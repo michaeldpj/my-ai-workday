@@ -12,12 +12,12 @@ The View menu lists six views, each on its own shortcut and on a tab under the h
 
 | View | Shortcut | What it shows |
 |------|----------|---------------|
-| Dashboard | Cmd+1 | Project cards with repo status and age pills, tasks, Today, the inbox, the Work · Personal · All scope switch, and a rollup on each card of open issues, PRs and ideas in flight. |
-| Ideas | Cmd+2 | A board from inbox to shipped, with keyboard triage and an action for each stage. |
+| Dashboard | Cmd+1 | Project cards with repo status and age pills, tasks, Today, the inbox, the Work · Personal · All scope switch, a rollup on each card of open issues, PRs and ideas in flight, and an Upstream clone box per repo that keeps someone else's project out of the activity figures. |
+| Ideas | Cmd+2 | A board from inbox to shipped, with keyboard triage, an action for each stage, and a bar that picks the CLI, model and reasoning level each launch uses. |
 | Issues | Cmd+3 | Issues and pull requests across a project's repos, read through the local `gh` CLI into the store folder's `issues/` directory and never written. |
 | Lists | Cmd+4 | Free-standing checklists that are not tied to a project. |
 | Timeline | Cmd+5 | Commits, session-log issues, PRs and idea moves by week, read from local git and the issue store. |
-| Summary | Cmd+6 | Stat tiles, charts and a repo health table over the same sources. |
+| Summary | Cmd+6 | Stat tiles, charts, pipeline flow and stage dwell times, and a repo health table over the same sources. |
 
 ![Ideas board](docs/images/ideas.png)
 

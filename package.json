@@ -1,7 +1,7 @@
 {
   "name": "my-ai-workday",
   "productName": "My AI Workday",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Workspace dashboard and idea pipeline for an AI-assisted working day",
   "license": "MIT",
   "main": "dist/main/index.js",

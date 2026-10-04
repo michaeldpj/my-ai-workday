@@ -1,5 +1,7 @@
 # My AI Workday
 
+I work on more than a dozen projects at a time, most of them with AI sessions committing changes faster than I can review them, and by the end of a week I had lost track of which repositories held uncommitted work or a branch that never merged. Ideas came in just as fast and ended up scattered across notes I never went back to, so I needed one place to see the state of every project and a way to capture an idea in a few seconds without stopping what I was doing.
+
 My AI Workday is a macOS desktop app that groups the git repositories you add from one folder into project cards and scans each of them. Each card shows what needs attention, covering uncommitted changes, commits not yet pushed, branches holding work the default branch lacks and worktrees holding files that exist nowhere else, with an age on each signal so a week-old stray branch stands out from this morning's edits. The app also keeps an Ideas board for a capture-to-ship pipeline that can hand each stage to Claude Code.
 
 ![Dashboard with three sample project cards](docs/images/dashboard.png)

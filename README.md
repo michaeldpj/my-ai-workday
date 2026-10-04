@@ -93,6 +93,8 @@ The dashboard starts empty. Name a card in the dashed New card tile at the end o
 
 This repository doubles as a Claude Code marketplace named `my-ai-workday`, and its one plugin, `idea-pipeline`, holds fourteen skills, five agents, the `ideas` command (put on PATH inside sessions) and a hook that asks once for a session record after a session pushes. The skills take an idea from capture through brainstorm, plan, review, execute and ship, and they read and write the same store the Ideas board shows.
 
+![The idea pipeline: capture, brainstorm, plan, adversarial review, queue, build and ship, with an express lane that lets low-effort ideas skip plan and review](docs/images/pipeline-dark.png)
+
 From the folder where you cloned this repository, install it with two commands.
 
 ```bash

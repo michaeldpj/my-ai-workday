@@ -1,0 +1,12 @@
+{
+  "name": "my-ai-workday",
+  "owner": { "name": "My AI Workday" },
+  "description": "Stage skills for the My AI Workday Ideas board.",
+  "plugins": [
+    {
+      "name": "idea-pipeline",
+      "source": "./plugin",
+      "description": "Idea pipeline skills, agents, store CLI and session-log hook."
+    }
+  ]
+}

@@ -10,6 +10,7 @@ since anyone can run or replace them.
 | Component | Repo | Runs on | Role |
 |-----------|------|---------|------|
 | Desktop | this repository | Mac (Electron) | Primary surface. Git scanning, projects/tasks, Ideas board, AI features, terminal launcher. Owner of all state. |
+| Stage skills | this repository, `plugin/` | Claude Code | The idea-pipeline plugin: stage skills, agents, the `ideas` CLI and a session-log hook. Writes the ideas store only through the CLI. |
 | Sync server (optional) | not in this repository | any host the user runs | HTTP server implementing the endpoints below. Mirror and mailbox, never an authority. |
 | Phone app (optional) | not in this repository | phone | Read-mostly dashboard plus quick capture. |
 
@@ -71,6 +72,8 @@ best-effort and outside the lock, only when the user has added an upstream.
 The Mac is the sole authority. The sync server never holds the brief, the
 plan, the review verdict, or the history, only a narrow projection for
 rendering cards on the phone.
+
+The idea-pipeline plugin carries the same store modules in `plugin/lib`, copied from `scripts/`, so a Claude Code session and the app always resolve the same store folder.
 
 The two stores share the store folder and nothing else.
 `my-day-config.json` is gitignored inside the ideas repo.
@@ -177,7 +180,7 @@ The app copies shell commands to the clipboard and never writes to any repo.
 The one amendment is that the Ideas board may open a Terminal or iTerm window
 running an enumerated Claude Code slash command (`src/main/terminal.js`). The
 launcher accepts an action key from a frozen map plus a regex-validated idea
-id, never a command string, applies shell quoting before AppleScript quoting,
+id, never a command string, resolves the stage to one of two fixed forms (its bare name for a skill in the config folder's `skills/`, or `idea-pipeline:<name>` for one from a user-scope, enabled plugin install, reading the plugin records only to check that a skill file exists), applies shell quoting before AppleScript quoting,
 and resolves the repo path with realpath strictly beneath the configured Repo
 Folder. Claude Code prompts before touching files, so the app starts sessions
 but authors nothing. Nothing in the system deploys, because `/idea-execute`

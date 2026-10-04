@@ -1,0 +1,3 @@
+#!/bin/sh
+# The idea store CLI. The plugin puts this folder on PATH, so skills run `ideas <command>`.
+exec node "$(dirname "$0")/../lib/ideas.mjs" "$@"

@@ -1,0 +1,11 @@
+# Read-only policy for Gemini reviews. Pass with --admin-policy so it outranks every other tier.
+[[rule]]
+toolName = "*"
+decision = "deny"
+priority = 100
+denyMessage = "Read-only review: only read tools are allowed."
+
+[[rule]]
+toolName = ["read_file", "read_many_files", "glob", "grep_search", "list_directory"]
+decision = "allow"
+priority = 900

@@ -1,0 +1,5 @@
+{
+  "name": "idea-pipeline",
+  "description": "A cross-repo idea pipeline for Claude Code: capture, brainstorm, plan, review, queue, execute and ship ideas through the My AI Workday store, plus session logging to GitHub Issues.",
+  "author": { "name": "My AI Workday" }
+}

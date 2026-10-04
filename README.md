@@ -38,7 +38,7 @@ The app never writes to your repositories. Push, Commit and the ship action copy
 - Node 22, which is what CI runs.
 - The GitHub CLI, signed in with `gh auth login`, for the Issues view, PR rows, and telling a squash-merged branch from a forgotten one. Without it those parts show a note that `gh` is not installed or not on PATH, and the rest of the app works.
 - Optional: an Anthropic API key, for Briefing, Weekly, commit message suggestions and task breakdown.
-- Optional: Claude Code, with stage skills named `idea-brainstorm`, `idea-plan`, `idea-review`, `idea-execute`, `idea-ship`, `idea-reset`, `idea-revise` and `idea-reopen`, for the Ideas board's launch buttons. Those skills are not part of this repository.
+- Optional: Claude Code, for the Ideas board's stage skills and launch buttons. The skills ship in this repository as a Claude Code plugin, described under Claude Code skills below.
 
 ## Build from source
 
@@ -79,15 +79,32 @@ The dashboard starts empty. Name a card in the dashed New card tile at the end o
 ## Off by default
 
 - Sync. With no Sync Server URL the workspace loop never starts, the ideas loop reports itself unconfigured without making a request, and the header's sync dot reads disconnected.
-- Ideas launch buttons. A stage's launch button appears only when its skill exists at `<config folder>/skills/<name>/SKILL.md`. Each card's copy button, which puts the same command on the clipboard, is there either way.
+- Ideas launch buttons. A stage's launch button appears when its skill exists at `<config folder>/skills/<name>/SKILL.md`, or when that config folder has the `idea-pipeline` plugin installed at user scope and enabled. Each card's copy button, which puts the same command on the clipboard, is there either way.
 - Ideas history in git. Ideas save to `ideas.json` in the store folder either way, and are committed only after `node scripts/ideas.mjs init` makes the store folder a git repository. Nothing is pushed unless you add a remote yourself.
 - AI features. Without a key the per-repo AI, focus suggest, task breakdown and Analyze Statuses buttons are hidden, and Briefing and Weekly open with "Set your API key in Settings (⌘,) to use AI features."
+
+## Claude Code skills
+
+This repository doubles as a Claude Code marketplace named `my-ai-workday`, and its one plugin, `idea-pipeline`, holds fourteen skills, five agents, the `ideas` command (put on PATH inside sessions) and a hook that asks once for a session record after a session pushes. The skills take an idea from capture through brainstorm, plan, review, execute and ship, and they read and write the same store the Ideas board shows.
+
+From the folder where you cloned this repository, install it with two commands.
+
+```bash
+claude plugin marketplace add "$PWD"
+claude plugin install idea-pipeline@my-ai-workday
+```
+
+Plugin skills are invoked with the plugin's name in front, as `/idea-pipeline:idea`, `/idea-pipeline:idea-brainstorm` and so on, and a skill of the same name in your own `~/.claude/skills` takes precedence over the plugin's. Installing copies the plugin into Claude Code's plugin cache under a version taken from the clone's current commit, so after a `git pull` run `claude plugin marketplace update my-ai-workday` and then `claude plugin update idea-pipeline@my-ai-workday`, and start a new session. The same repository also works as a GitHub marketplace through `claude plugin marketplace add <owner>/<repo>`, which updates with the same two commands.
+
+The Ideas bar's work and personal toggle reads whichever config folder is selected, so installing for the personal CLI means running both commands with `CLAUDE_CONFIG_DIR` set to that folder. The skills find projects through `ideas projects`, which lists the cards on your dashboard, and find repositories through `ideas root`, which prints the Repo Folder from Settings, so add a card before the first `/idea-pipeline:idea-brainstorm`.
+
+The skills need Node, git and `gh` signed in, and `/idea-pipeline:idea-review` can also use the Codex or Gemini CLI as an independent reviewer when one is installed. `/idea-pipeline:idea-execute` and `/idea-pipeline:session-issue` need each repository to be a git clone whose `origin` is on GitHub. The store keeps no history until `ideas init` makes its folder a git repository, and adding a private remote there backs it up.
 
 ## Data
 
 Everything lives in the store folder, which is `~/.my-ai-workday` on a fresh install or whatever folder `MY_AI_WORKDAY_HOME` names. It holds `my-day-config.json` (settings and workspace), `ideas.json` (the ideas store, written only through `scripts/ideas-store.mjs` under a lock) and `issues/<repo>.json` (the local copy of each repository's issues and PRs). Three Keychain items sit under the service `workspace-dashboard`, and deleting the store folder along with those items resets the app.
 
-The ideas CLI works on the same store from a terminal, and `node scripts/ideas.mjs --help` lists its commands.
+The ideas CLI works on the same store from a terminal, and `node scripts/ideas.mjs --help` lists its commands. Inside a Claude Code session with the plugin installed, the same CLI is the `ideas` command.
 
 ## Companions
 

@@ -79,7 +79,7 @@ test('stageCommand refuses what the launcher refuses', () => {
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CLI_KEYS, EFFORTS, worktreeName, sessionName, buildCommand, claudeConfigDir, launchableActions, launchSession } from './terminal.js';
+import { CLI_KEYS, EFFORTS, worktreeName, sessionName, buildCommand, claudeConfigDir, launchableActions, launchableSkills, pluginSkillRoots, launchSession } from './terminal.js';
 
 const PARTS = {
   cwd: '/Users/me/github/hollow-app', cli: 'work', model: 'fable', effort: 'medium',
@@ -199,4 +199,171 @@ test('worktreeName cuts a long title at forty characters without a dangling hyph
   const name = worktreeName('a'.repeat(39) + ' bb cc dd', 'idea-a1b2-c3d4');
   assert.equal(name, `idea-${'a'.repeat(39)}-c3d4`);
   assert.ok(/^[a-z0-9-]{1,64}$/.test(name));
+});
+
+/** A fake config folder: user skills, and optionally one plugin install. */
+function fakeConfig({ userSkills = [], plugin = null } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cfg-'));
+  const skill = (base, name) => {
+    fs.mkdirSync(path.join(base, 'skills', name), { recursive: true });
+    fs.writeFileSync(path.join(base, 'skills', name, 'SKILL.md'), '# x\n');
+  };
+  for (const s of userSkills) skill(root, s);
+  if (plugin) {
+    const installPath = plugin.installPath ?? path.join(root, 'plugins', 'cache', 'm', 'idea-pipeline', 'abc');
+    for (const s of plugin.skills ?? []) skill(installPath, s);
+    const key = plugin.key ?? 'idea-pipeline@my-ai-workday';
+    fs.mkdirSync(path.join(root, 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'plugins', 'installed_plugins.json'), JSON.stringify({
+      version: plugin.version ?? 2,
+      plugins: { [key]: [{ scope: plugin.scope ?? 'user', installPath, version: 'abc' }] },
+    }));
+    fs.writeFileSync(path.join(root, 'settings.json'), JSON.stringify({ enabledPlugins: { [key]: plugin.enabled ?? true } }));
+  }
+  return root;
+}
+
+const STAGES = ['idea-brainstorm', 'idea-plan', 'idea-review', 'idea-execute', 'idea-ship', 'idea-reset', 'idea-revise', 'idea-reopen'];
+
+test('a plugin-only stage launches in the namespaced form', () => {
+  const root = fakeConfig({ plugin: { skills: STAGES } });
+  const skills = launchableSkills(root);
+  assert.equal(skills.plan, 'idea-pipeline:idea-plan');
+  assert.deepEqual(Object.keys(skills), ['brainstorm', 'plan', 'review', 'execute', 'ship', 'reset', 'revise', 'reopen']);
+  assert.deepEqual(launchableActions(root), Object.keys(skills));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the user skill wins over the plugin and launches bare', () => {
+  const root = fakeConfig({ userSkills: ['idea-plan'], plugin: { skills: STAGES } });
+  assert.equal(launchableSkills(root).plan, 'idea-plan');
+  assert.equal(launchableSkills(root).review, 'idea-pipeline:idea-review');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a disabled, project-scoped, unknown-format or other plugin is not seen', () => {
+  for (const plugin of [
+    { skills: STAGES, enabled: false },
+    { skills: STAGES, enabled: 'true' },
+    { skills: STAGES, scope: 'project' },
+    { skills: STAGES, scope: 'local' },
+    { skills: STAGES, version: 1 },
+    { skills: STAGES, version: '2' },
+    { skills: STAGES, key: 'other-plugin@my-ai-workday' },
+    { skills: STAGES, key: 'idea-pipeline-evil@my-ai-workday' },
+  ]) {
+    const root = fakeConfig({ plugin });
+    assert.deepEqual(launchableSkills(root), {}, JSON.stringify(plugin));
+    assert.deepEqual(pluginSkillRoots(root), [], JSON.stringify(plugin));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a relative installPath is ignored', () => {
+  const root = fakeConfig();
+  fs.mkdirSync(path.join(root, 'plugins'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'plugins', 'installed_plugins.json'),
+    JSON.stringify({ version: 2, plugins: { 'idea-pipeline@m': [{ scope: 'user', installPath: 'relative/path' }] } }));
+  fs.writeFileSync(path.join(root, 'settings.json'), JSON.stringify({ enabledPlugins: { 'idea-pipeline@m': true } }));
+  assert.deepEqual(pluginSkillRoots(root), []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a plugin under another marketplace name still counts', () => {
+  const root = fakeConfig({ plugin: { skills: ['idea-plan'], key: 'idea-pipeline@a-fork' } });
+  assert.equal(launchableSkills(root).plan, 'idea-pipeline:idea-plan');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('corrupt plugin files hide the plugin and break nothing', () => {
+  const root = fakeConfig({ userSkills: ['idea-plan'] });
+  fs.mkdirSync(path.join(root, 'plugins'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'plugins', 'installed_plugins.json'), '{nope');
+  fs.writeFileSync(path.join(root, 'settings.json'), 'also nope');
+  assert.deepEqual(launchableSkills(root), { plan: 'idea-plan' });
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('either plugin file missing hides the plugin', () => {
+  for (const drop of [['plugins', 'installed_plugins.json'], ['settings.json']]) {
+    const root = fakeConfig({ userSkills: ['idea-review'], plugin: { skills: STAGES } });
+    fs.rmSync(path.join(root, ...drop));
+    assert.deepEqual(pluginSkillRoots(root), [], drop.join('/'));
+    assert.deepEqual(launchableSkills(root), { review: 'idea-review' }, drop.join('/'));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a wrong shape in either plugin file hides the plugin', () => {
+  const shapes = [
+    [{ version: 2, plugins: null }, { enabledPlugins: { 'idea-pipeline@m': true } }],
+    [{ version: 2, plugins: 'idea-pipeline@m' }, { enabledPlugins: { 'idea-pipeline@m': true } }],
+    [{ version: 2, plugins: { 'idea-pipeline@m': 'not an array' } }, { enabledPlugins: { 'idea-pipeline@m': true } }],
+    [{ version: 2, plugins: { 'idea-pipeline@m': [null, 7] } }, { enabledPlugins: { 'idea-pipeline@m': true } }],
+    [{ version: 2, plugins: { 'idea-pipeline@m': [{ scope: 'user', installPath: '/x' }] } }, { enabledPlugins: null }],
+    [{ version: 2, plugins: { 'idea-pipeline@m': [{ scope: 'user', installPath: '/x' }] } }, {}],
+    [null, { enabledPlugins: { 'idea-pipeline@m': true } }],
+  ];
+  for (const [installed, settings] of shapes) {
+    const root = fakeConfig();
+    fs.mkdirSync(path.join(root, 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'plugins', 'installed_plugins.json'), JSON.stringify(installed));
+    fs.writeFileSync(path.join(root, 'settings.json'), JSON.stringify(settings));
+    assert.deepEqual(pluginSkillRoots(root), [], JSON.stringify([installed, settings]));
+    assert.deepEqual(launchableSkills(root), {});
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('no config folder means nothing launchable and no plugin', () => {
+  assert.deepEqual(pluginSkillRoots(null), []);
+  assert.deepEqual(launchableSkills(null), {});
+  assert.deepEqual(launchableSkills(path.join(os.tmpdir(), 'no-such-config-folder-xyz')), {});
+});
+
+test('a hostile install key or path never reaches the command', () => {
+  const evil = fs.mkdtempSync(path.join(os.tmpdir(), "it's; rm -rf ~ "));
+  const root = fakeConfig({ plugin: { skills: ['idea-plan'], key: 'idea-pipeline@x; rm -rf ~', installPath: evil } });
+  const skills = launchableSkills(root);
+  assert.equal(skills.plan, 'idea-pipeline:idea-plan');
+  const { command } = buildCommand({ ...PARTS, slash: skills.plan });
+  assert.ok(command.endsWith(' /idea-pipeline:idea-plan idea-a1b2-c3d4'));
+  assert.ok(!command.includes('rm -rf'));
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(evil, { recursive: true, force: true });
+});
+
+test('buildCommand refuses a slash that is not a launchable form', () => {
+  assert.match(buildCommand({ ...PARTS, slash: 'idea-plan; rm -rf /' }).error, /unknown stage command/);
+  assert.match(buildCommand({ ...PARTS, slash: 'idea-queue' }).error, /unknown stage command/);
+  assert.match(buildCommand({ ...PARTS, slash: 'idea-pipeline:idea-kill' }).error, /unknown stage command/);
+  assert.match(buildCommand({ ...PARTS, slash: 'evil:idea-plan' }).error, /unknown stage command/);
+  assert.match(buildCommand({ ...PARTS, slash: 'constructor' }).error, /unknown stage command/);
+  assert.match(buildCommand({ ...PARTS, slash: '__proto__' }).error, /unknown stage command/);
+  assert.match(buildCommand({ ...PARTS, slash: undefined }).error, /unknown stage command/);
+  assert.ok(buildCommand({ ...PARTS, slash: 'idea-pipeline:idea-plan' }).ok);
+});
+
+test('the copy button follows the same resolution, including queue and kill', () => {
+  const root = fakeConfig({ userSkills: ['idea-plan'], plugin: { skills: ['idea-plan', 'idea-queue', 'idea-kill'] } });
+  assert.equal(stageCommand('plan', 'idea-a1b2-c3d4', root).command, '/idea-plan idea-a1b2-c3d4');
+  assert.equal(stageCommand('queue', 'idea-a1b2-c3d4', root).command, '/idea-pipeline:idea-queue idea-a1b2-c3d4');
+  assert.equal(stageCommand('kill', 'idea-a1b2-c3d4', root).command, '/idea-pipeline:idea-kill idea-a1b2-c3d4');
+  assert.equal(stageCommand('review', 'idea-a1b2-c3d4', root).command, '/idea-review idea-a1b2-c3d4');
+  assert.match(stageCommand('constructor', 'idea-a1b2-c3d4', root).error, /unknown action/);
+  assert.match(stageCommand('toString', 'idea-a1b2-c3d4').error, /unknown action/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('queue and kill never become launchable, even when installed', () => {
+  const root = fakeConfig({ userSkills: ['idea-queue'], plugin: { skills: ['idea-kill'] } });
+  assert.deepEqual(launchableSkills(root), {});
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('launchSession refuses an inherited key as an unknown action', async () => {
+  for (const action of ['constructor', 'toString', '__proto__']) {
+    const res = await launchSession(action, 'idea-a1b2-c3d4', 'hollow-app', os.tmpdir(), { ...PARTS });
+    assert.match(res.error, /unknown action/, action);
+  }
 });

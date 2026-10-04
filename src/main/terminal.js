@@ -6,7 +6,8 @@
  * a Claude Code command, and Claude Code prompts before it touches a file.
  *
  * Nothing from the renderer reaches AppleScript. The caller names an ACTION
- * from a frozen list and an idea id; the command string is built here.
+ * from a frozen list and an idea id. The command string is built here, from
+ * one of two fixed forms per action.
  */
 
 import { execFile, execFileSync } from 'node:child_process';
@@ -41,6 +42,30 @@ const COPY_ONLY = Object.freeze({
   kill: 'idea-kill',
 });
 
+/** The plugin that ships the stage skills: `name` in plugin/.claude-plugin/plugin.json. */
+export const PLUGIN_NAME = 'idea-pipeline';
+
+/**
+ * The only two strings a stage can be invoked as, built once from the frozen
+ * maps above. Nothing read from disk is ever concatenated into a command: the
+ * plugin files decide which of these two is used, never what it says.
+ */
+const SLASH_FORMS = Object.freeze(Object.fromEntries(
+  [...Object.entries(ACTIONS), ...Object.entries(COPY_ONLY)].map(([action, name]) =>
+    [action, Object.freeze({ user: name, plugin: `${PLUGIN_NAME}:${name}` })]),
+));
+
+/** What buildCommand will put after the slash: the two forms of each launchable action, never COPY_ONLY. */
+const LAUNCH_SLASHES = new Set(Object.keys(ACTIONS).flatMap((a) => [SLASH_FORMS[a].user, SLASH_FORMS[a].plugin]));
+
+function readJson(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
 const ID_RE = /^idea-[a-z0-9]+-[a-z0-9]+$/;
 
 /**
@@ -59,13 +84,53 @@ export function claudeConfigDir(cli, personalDir) {
 }
 
 /**
- * The stage actions whose skill exists in a config folder. A plain file
- * check: skills that arrive through a plugin are not seen, and the launch
- * falls back to the copy button for them.
+ * Install folders of the stage-skill plugin in a config folder: user scope,
+ * enabled in its settings.json, absolute path. Both files are written by
+ * Claude Code and readable by anything on the machine, so they are untrusted
+ * and only ever feed existsSync. Any read or shape problem means no plugin,
+ * and the launch falls back to the copy button.
  */
-export function launchableActions(configDir) {
+export function pluginSkillRoots(configDir) {
   if (!configDir) return [];
-  return Object.keys(ACTIONS).filter((a) => fs.existsSync(path.join(configDir, 'skills', ACTIONS[a], 'SKILL.md')));
+  const installed = readJson(path.join(configDir, 'plugins', 'installed_plugins.json'));
+  if (installed?.version !== 2 || !installed.plugins || typeof installed.plugins !== 'object') return [];
+  const enabled = readJson(path.join(configDir, 'settings.json'))?.enabledPlugins;
+  if (!enabled || typeof enabled !== 'object') return [];
+  const roots = [];
+  for (const [key, entries] of Object.entries(installed.plugins)) {
+    if (key.split('@')[0] !== PLUGIN_NAME || !Object.hasOwn(enabled, key) || enabled[key] !== true || !Array.isArray(entries)) continue;
+    for (const e of entries) {
+      if (e?.scope === 'user' && typeof e.installPath === 'string' && path.isAbsolute(e.installPath)) roots.push(e.installPath);
+    }
+  }
+  return roots;
+}
+
+/**
+ * How each stage is invoked for a config folder. The user's own skill first,
+ * bare, because Claude Code ranks a user skill above a plugin skill of the
+ * same name. Otherwise the plugin's skill, namespaced, which is the documented
+ * way to call one. A stage with neither is absent. `actions` is a list of
+ * action names, and only those in SLASH_FORMS are used: the skill name checked
+ * on disk and the form returned both come from that frozen map.
+ */
+export function launchableSkills(configDir, actions = Object.keys(ACTIONS)) {
+  if (!configDir) return {};
+  const roots = pluginSkillRoots(configDir);
+  const has = (base, name) => fs.existsSync(path.join(base, 'skills', name, 'SKILL.md'));
+  const out = {};
+  for (const action of actions) {
+    if (!Object.hasOwn(SLASH_FORMS, action)) continue;
+    const form = SLASH_FORMS[action];
+    if (has(configDir, form.user)) out[action] = form.user;
+    else if (roots.some((r) => has(r, form.user))) out[action] = form.plugin;
+  }
+  return out;
+}
+
+/** The stage actions that can launch for a config folder, in ACTIONS order. */
+export function launchableActions(configDir) {
+  return Object.keys(launchableSkills(configDir));
 }
 
 /** What `claude --effort` accepts. The UI calls this reasoning, to keep it apart from an idea's effort. */
@@ -108,10 +173,11 @@ export function sessionName(title, ideaId) {
 
 /**
  * The command a stage session is started with, from validated parts. Pure so
- * it can be tested without AppleScript. `cwd` and `slash` are trusted here
- * because launchSession has already resolved and confined them; `name` is
- * free text and is only ever shell-quoted; everything else is checked against
- * an enum or a character class before it is used.
+ * it can be tested without AppleScript. `cwd` is trusted here because
+ * launchSession has already resolved and confined it, and `slash` must be one
+ * of the launchable forms; `name` is free text and is only ever shell-quoted;
+ * everything else is checked against an enum or a character class before it
+ * is used.
  */
 export function buildCommand({ cwd, cli, personalDir, model, effort, worktree, name, slash, ideaId }) {
   if (!CLI_KEYS.includes(cli)) return { ok: false, error: `unknown cli "${cli}"` };
@@ -121,6 +187,7 @@ export function buildCommand({ cwd, cli, personalDir, model, effort, worktree, n
   if (!EFFORTS.includes(effort)) return { ok: false, error: `unknown effort "${effort}"` };
   if (!WORKTREE_RE.test(worktree || '')) return { ok: false, error: 'malformed worktree name' };
   if (!ID_RE.test(ideaId)) return { ok: false, error: 'malformed idea id' };
+  if (!LAUNCH_SLASHES.has(slash)) return { ok: false, error: 'unknown stage command' };
   const env = cli === 'personal' ? `CLAUDE_CONFIG_DIR=${shq(personalDir)} ` : '';
   return {
     ok: true,
@@ -190,8 +257,7 @@ export function resolveLaunchRepo(idea, ws) {
  * @param {{cli: string, personalDir: string, model: string, effort: string, worktree: string, name: string}} opts  enumerated launch settings, the expanded personal Claude folder ('' when unset), and the session name
  */
 export function launchSession(action, ideaId, repo, basePath, opts = {}) {
-  const slash = ACTIONS[action];
-  if (!slash) return { ok: false, error: `unknown action "${action}"` };
+  if (!Object.hasOwn(ACTIONS, action)) return { ok: false, error: `unknown action "${action}"` };
   if (!ID_RE.test(ideaId)) return { ok: false, error: 'malformed idea id' };
   // Shared with the git scanner rather than re-derived: several real checkouts
   // have a space in the directory name, the repo name reaches AppleScript
@@ -199,9 +265,8 @@ export function launchSession(action, ideaId, repo, basePath, opts = {}) {
   // to be refused is a name that walks out of the root, which the realpath
   // confinement below catches for good.
   if (!safeRepoName(repo)) return { ok: false, error: 'malformed repo name' };
-  if (!launchableActions(claudeConfigDir(opts.cli, opts.personalDir)).includes(action)) {
-    return { ok: false, error: `/${slash} is not installed for the ${opts.cli} CLI` };
-  }
+  const slash = launchableSkills(claudeConfigDir(opts.cli, opts.personalDir))[action];
+  if (!slash) return { ok: false, error: `/${ACTIONS[action]} is not installed for the ${opts.cli} CLI` };
 
   // A name guard is not a location guard: an ordinary-looking child can be a
   // symlink pointing anywhere. ideas.json is writable by anything on the
@@ -250,11 +315,15 @@ export function launchSession(action, ideaId, repo, basePath, opts = {}) {
  *
  * No `cd` prefix and no repo: this is meant for a session that is already open
  * somewhere. The caller gets the repo separately and says it in the toast.
+ *
+ * With a config folder it copies the form that folder would launch, so a
+ * plugin-only install gets the namespaced command, and with none installed it
+ * copies the bare name as before.
  */
-export function stageCommand(action, ideaId) {
-  const slash = ACTIONS[action] || COPY_ONLY[action];
-  if (!slash) return { ok: false, error: `unknown action "${action}"` };
+export function stageCommand(action, ideaId, configDir = null) {
+  if (!Object.hasOwn(SLASH_FORMS, action)) return { ok: false, error: `unknown action "${action}"` };
   if (!ID_RE.test(ideaId)) return { ok: false, error: 'malformed idea id' };
+  const slash = launchableSkills(configDir, [action])[action] || SLASH_FORMS[action].user;
   return { ok: true, command: `/${slash} ${ideaId}` };
 }
 

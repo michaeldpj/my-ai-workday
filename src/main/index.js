@@ -487,7 +487,8 @@ function registerIPC() {
     const { ideas } = ideasSnapshot();
     const idea = ideas.find(i => i.id === id);
     if (!idea) return { ok: false, error: `no idea ${id}` };
-    const res = stageCommand(action, idea.id);
+    const prefs = getLaunchPrefs();
+    const res = stageCommand(action, idea.id, claudeConfigDir(prefs.cli, getPersonalClaudeDir()));
     if (!res.ok) return res;
     return { ...res, repo: resolveLaunchRepo(idea, loadState()?.ws).repo || null };
   });

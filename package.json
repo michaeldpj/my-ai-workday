@@ -13,7 +13,8 @@
     "install-app": "npm run build && (osascript -e 'quit app \"My Day\"' -e 'quit app \"My AI Workday\"' >/dev/null 2>&1; pkill -x \"My Day\"; pkill -x \"My AI Workday\"; true) && rm -rf \"/Applications/My Day.app\" \"/Applications/My AI Workday.app\" && cp -R \"release/mac-arm64/My AI Workday.app\" /Applications/ && /usr/bin/xattr -cr \"/Applications/My AI Workday.app\"",
     "harness": "node dev/serve.mjs",
     "test": "node --test src/main/*.test.js src/renderer/*.test.js scripts/*.test.mjs",
-    "scrub": "node scripts/scrub-check.mjs"
+    "scrub": "node scripts/scrub-check.mjs",
+    "plugin:lib": "node scripts/sync-plugin-lib.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

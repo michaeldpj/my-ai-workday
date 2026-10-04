@@ -106,6 +106,33 @@ Everything lives in the store folder, which is `~/.my-ai-workday` on a fresh ins
 
 The ideas CLI works on the same store from a terminal, and `node scripts/ideas.mjs --help` lists its commands. Inside a Claude Code session with the plugin installed, the same CLI is the `ideas` command.
 
+## Uninstall
+
+Quit the app, then remove it along with the Electron profile that holds its window state and view preferences.
+
+```bash
+rm -rf "/Applications/My AI Workday.app"
+rm -rf ~/Library/Application\ Support/My\ AI\ Workday
+```
+
+If you installed the Claude Code plugin, remove it and the marketplace, and repeat both commands with `CLAUDE_CONFIG_DIR` set for any personal config folder you installed it into.
+
+```bash
+claude plugin uninstall idea-pipeline@my-ai-workday
+claude plugin marketplace remove my-ai-workday
+```
+
+The store folder holds your ideas, cards and issue copies, so back it up first if you want to keep them, and if you added a remote to it under `ideas init` that history survives on the remote either way. Deleting it and the three Keychain items removes the last of the app's data, and a store moved with `MY_AI_WORKDAY_HOME` needs that path in place of `~/.my-ai-workday`.
+
+```bash
+rm -rf ~/.my-ai-workday
+security delete-generic-password -s workspace-dashboard -a anthropic-api-key
+security delete-generic-password -s workspace-dashboard -a sync-token
+security delete-generic-password -s workspace-dashboard -a ideas-publish-token
+```
+
+Each `security` command reports that the item could not be found when that key or token was never saved, which is harmless. Worktrees that Claude Code made for the launch buttons stay inside your repositories under `.claude/worktrees/`, and uninstalling does not remove them.
+
 ## Companions
 
 A sync server and a phone app exist as separate, optional projects that are not published here. `docs/ARCHITECTURE.md` documents the protocol the desktop speaks to them.

@@ -35,7 +35,7 @@ The app never writes to your repositories. Push, Commit and the ship action copy
 
 The Electron main process sits at the center, taking IPC calls from the renderer, reading your checkouts and GitHub through read-only `git` and `gh`, keeping secrets in the Keychain, and writing its own state to the store folder, which the Claude Code plugin also writes through the `ideas` CLI. `docs/ARCHITECTURE.md` covers the stores, the sync protocol and the write boundary in detail.
 
-![Architecture diagram: renderer, main process, store folder, Keychain, Git scanner, Issues sync, Claude Code, GitHub, sync server and Anthropic API](docs/images/architecture.png)
+![Architecture diagram: renderer, main process, store folder, Keychain, Git scanner, Issues sync, Claude Code, GitHub, sync server and Anthropic API](docs/images/architecture-dark.png)
 
 ## Requirements
 

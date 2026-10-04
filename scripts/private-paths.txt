@@ -5,3 +5,4 @@ CLAUDE.md
 CHANGELOG.md
 docs/plans/
 workspace-dashboard-prompt.txt
+docs/audits/

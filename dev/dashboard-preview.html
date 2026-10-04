@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard preview</title>
+</head>
+<body>
+<script type="module">
+// Dev-only. Loads the real index.html body and app.js against a stub
+// electronAPI that enforces main's save-state and scope-prefs-set rules, so
+// card management can be exercised without touching the store folder or the sync server.
+const bust = `?t=${Date.now()}`;
+const link = document.createElement('link');
+link.rel = 'stylesheet';
+link.href = '../src/renderer/styles.css' + bust;
+document.head.appendChild(link);
+
+const { FIXTURE, EMPTY } = await import(`./dashboard-fixtures.js${bust}`);
+// ?state=empty loads what a stranger's first launch sees.
+const empty = new URLSearchParams(location.search).get('state') === 'empty';
+const F = empty ? EMPTY : FIXTURE;
+const { validateWorkspace } = await import('../src/renderer/workspace-model.js');
+const { SCOPES } = await import('../src/renderer/scope-model.js');
+
+const html = await (await fetch('../src/renderer/index.html' + bust)).text();
+const doc = new DOMParser().parseFromString(html, 'text/html');
+doc.querySelectorAll('script').forEach((s) => s.remove());
+document.body.innerHTML = doc.body.innerHTML;
+
+let saved = structuredClone(F.workspace);
+let scope = structuredClone(F.scopePrefs);
+window.__saved = () => structuredClone(saved);
+window.__scope = () => structuredClone(scope);
+window.__confirmAnswer = true;
+window.__confirms = [];
+window.__toasts = [];
+window.confirm = (m) => { window.__confirms.push(m); return window.__confirmAnswer; };
+new MutationObserver(() => {
+  const t = document.getElementById('toast');
+  if (t?.classList.contains('show') && window.__toasts.at(-1) !== t.textContent) window.__toasts.push(t.textContent);
+}).observe(document.getElementById('toast'), { attributes: true, childList: true, characterData: true, subtree: true });
+
+const api = {
+  loadState: async () => structuredClone(saved),
+  // Same rule as the save-state handler in src/main/index.js.
+  saveState: async (data) => {
+    const check = validateWorkspace(data);
+    if (!check.ok) { console.warn('save refused:', check.error); return { error: check.error }; }
+    saved = structuredClone(data);
+    return { ok: true };
+  },
+  scopePrefsGet: async () => structuredClone(scope),
+  // Same rule as scope-prefs-set: work ids must name projects in the SAVED workspace.
+  scopePrefsSet: async (partial) => {
+    const p = partial && typeof partial === 'object' ? partial : {};
+    const next = structuredClone(scope);
+    if ('scope' in p) {
+      if (!SCOPES.includes(p.scope)) return { ok: false, error: `scope cannot be "${p.scope}"` };
+      next.scope = p.scope;
+    }
+    if ('work' in p) {
+      const ids = new Set(saved.ws.map((x) => x.id));
+      if (!Array.isArray(p.work) || !p.work.every((id) => ids.has(id))) return { ok: false, error: 'work must list existing project ids' };
+      next.work = [...new Set(p.work)];
+    }
+    scope = next;
+    return { ok: true, ...next };
+  },
+  listRepos: async () => F.repoNames,
+  appSettingsGet: async () => structuredClone(F.appSettings),
+  storeDir: async () => '/Users/sample/.my-ai-workday',
+  appSettingsSet: async (partial) => ({ ok: true, ...structuredClone(F.appSettings), ...partial }),
+  ideasLoad: async () => ({ rev: 1, ideas: structuredClone(F.ideas) }),
+  ideaLaunchesGet: async () => ({}),
+  issuesCounts: async () => ({}),
+  issuesPrefsGet: async () => ({ projectId: '', kind: 'all', state: 'open', sort: 'updated' }),
+  boardPrefsGet: async () => ({ sort: 'impact' }),
+  launchPrefsGet: async () => ({ cli: 'work', model: 'fable', effort: 'medium', personal: !empty, launchable: empty ? [] : ['brainstorm', 'plan', 'review', 'execute', 'ship', 'reset', 'revise', 'reopen'] }),
+  scanRepos: async () => ({ results: {}, changedDeps: {}, isFirstScan: true }),
+  // Same shape as activityLoad in src/main/index.js, served to both views.
+  summaryLoad: async () => ({ commits: [], sessions: [], prs: [], issues: [] }),
+  timelineLoad: async () => ({ commits: [], sessions: [], prs: [], issues: [] }),
+  hasAIKey: async () => false,
+  getSyncStatus: async () => ({ status: 'connected' }),
+};
+// Anything else: event subscriptions are no-ops, invokes resolve to {}.
+window.electronAPI = new Proxy(api, {
+  get: (t, k) => (k in t ? t[k] : String(k).startsWith('on') ? () => {} : async () => ({})),
+});
+
+// Native drag events from evaluate_script, for when the MCP drag tool does not
+// fire HTML5 drag events. accepted is true when dragover called preventDefault.
+window.__drag = (src, dst) => {
+  const s = document.querySelector(src);
+  const d = document.querySelector(dst);
+  if (!s || !d) return { error: 'selector matched nothing' };
+  const dt = new DataTransfer();
+  const fire = (el, type) => el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }));
+  fire(s, 'dragstart');
+  const accepted = !fire(d, 'dragover');
+  fire(d, 'drop');
+  fire(s, 'dragend');
+  return { accepted };
+};
+
+try { localStorage.setItem('view', 'dashboard'); } catch { /* private mode */ }
+await import('../src/renderer/app.js' + bust);
+</script>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideas board preview</title>
+<!-- Stylesheet is injected with a cache-busting query below so edits show on reload. -->
+<style>
+  /* Harness chrome only. Not part of the app. */
+  #harness-bar{position:fixed;top:0;left:0;right:0;z-index:9000;display:flex;flex-wrap:wrap;gap:6px;
+    align-items:center;padding:8px 14px;background:#000;border-bottom:1px solid #30363d;font-size:12px;}
+  #harness-bar a{color:#8b949e;text-decoration:none;padding:3px 9px;border:1px solid #30363d;border-radius:6px;}
+  #harness-bar a.on{color:#0d1117;background:#e3b341;border-color:#e3b341;font-weight:700;}
+  #harness-bar button{color:#e6edf3;background:#21262d;border:1px solid #30363d;border-radius:6px;padding:3px 9px;cursor:pointer;font-size:12px;}
+  #harness-bar .sp{flex:1;}
+  body{padding-top:44px;}
+</style>
+</head>
+<body data-view="ideas">
+<div id="harness-bar"></div>
+
+<div id="ideas-view">
+  <div class="capture-row">
+    <input class="capture-input" id="idea-input" placeholder="Add an idea (&#x2318;I)..." autocomplete="off">
+    <select class="capture-sel" id="idea-project" title="Project"></select>
+    <select class="capture-sel" id="idea-impact" title="Impact">
+      <option value="">impact</option>
+      <option value="5">5 &middot; highest</option>
+      <option value="4">4</option>
+      <option value="3">3</option>
+      <option value="2">2</option>
+      <option value="1">1 &middot; lowest</option>
+    </select>
+    <select class="capture-sel" id="idea-effort" title="Your gut on the effort">
+      <option value="">effort</option>
+      <option value="low">low</option>
+      <option value="medium">medium</option>
+      <option value="high">high</option>
+    </select>
+    <select class="capture-sel" id="idea-model" title="Model for this idea's sessions. Empty follows the bar.">
+      <option value="">model</option>
+      <option value="fable">fable</option>
+      <option value="opus">opus</option>
+      <option value="sonnet">sonnet</option>
+      <option value="haiku">haiku</option>
+    </select>
+    <button class="capture-go" id="idea-add">Add</button>
+  </div>
+  <div class="ideas-bar">
+    <label class="mine-toggle"><input type="checkbox" id="mine-only" onchange="renderIdeas()"> Your move only</label>
+    <div class="bar-group" role="group" aria-label="Column sorting">
+      <span class="launch-label">sort</span>
+      <select class="capture-sel launch-sel" id="board-sort" title="How cards order inside each column">
+        <option value="impact">priority</option>
+        <option value="effort">effort</option>
+        <option value="project">project</option>
+      </select>
+    </div>
+    <span id="ideas-summary" class="ideas-summary"></span>
+    <span id="ideas-sync" class="ideas-sync" hidden></span>
+    <div class="bar-group" id="launch-group" role="group" aria-label="Launch settings">
+      <span class="launch-label">launch with</span>
+      <div class="seg" id="launch-cli">
+        <button type="button" data-cli="work" class="on">claude</button>
+        <button type="button" data-cli="personal">personal</button>
+      </div>
+      <select class="capture-sel launch-sel" id="launch-model" title="Default model">
+        <option value="fable">fable</option>
+        <option value="opus">opus</option>
+        <option value="sonnet">sonnet</option>
+        <option value="haiku">haiku</option>
+      </select>
+      <select class="capture-sel launch-sel" id="launch-reasoning" title="Reasoning level (claude --effort)">
+        <option value="low">low</option>
+        <option value="medium">medium</option>
+        <option value="high">high</option>
+        <option value="xhigh">xhigh</option>
+        <option value="max">max</option>
+      </select>
+    </div>
+    <label class="mine-toggle"><input type="checkbox" id="show-killed" onchange="renderIdeas()"> Show killed</label>
+    <span id="ideas-badge" hidden></span>
+  </div>
+  <div id="ideas-board"></div>
+</div>
+
+<div id="idea-overlay">
+  <div class="idea-box">
+    <h3 id="idea-title">Idea</h3>
+    <div class="idea-content" id="idea-content"></div>
+    <div class="idea-actions" id="idea-actions"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script type="module">
+// Cache-bust every dev asset so edits to styles.css / ideas-ui.js / new modules
+// show on a plain reload. The installed app never uses this file.
+const bust = `?t=${Date.now()}`;
+const link = document.createElement('link');
+link.rel = 'stylesheet';
+link.href = '../src/renderer/styles.css' + bust;
+document.head.appendChild(link);
+
+const { setIdeaProjects, initIdeaActions, initIdeaDrag, subscribeIdeas, loadIdeas, renderIdeas, loadBoardPrefs, loadLaunchPrefs } =
+  await import('../src/renderer/ideas-ui.js' + bust);
+const { FIXTURES, PROJECTS } = await import('./ideas-fixtures.js' + bust);
+window.renderIdeas = renderIdeas;
+
+const params = new URLSearchParams(location.search);
+const state = FIXTURES[params.get('state')] ? params.get('state') : 'full';
+let snap = JSON.parse(JSON.stringify(FIXTURES[state]));
+let onChanged = null;
+// `?skills=none` stands in for a machine with no personal folder and no
+// stage skills installed: no toggle, no launch group, no launch buttons.
+const ALL_LAUNCH = ['brainstorm', 'plan', 'review', 'execute', 'ship', 'reset', 'revise', 'reopen'];
+const skills = params.get('skills') !== 'none';
+let prefs = { cli: 'work', model: 'fable', effort: 'medium' };
+const launchState = () => ({ ...prefs, personal: skills, launchable: skills ? ALL_LAUNCH : [] });
+let board = { sort: 'impact' };
+let launches = {};
+
+// Per-state review composition: reward needs the mine filter on to trigger,
+// killed needs killed shown, everything else shows the whole board.
+document.getElementById('mine-only').checked = state === 'reward';
+document.getElementById('show-killed').checked = state === 'killed';
+
+// Minimal electronAPI stub. Reads return the fixture, writes are no-ops that
+// echo a benign success so the UI paths run without a backend.
+window.electronAPI = {
+  ideasLoad: async () => snap,
+  ideasAdd: async () => ({ ...snap }),
+  ideasMove: async ({ id, to }) => {
+    snap = { rev: snap.rev + 1, ideas: snap.ideas.map((i) => i.id === id ? { ...i, stage: to } : i) };
+    return snap;
+  },
+  ideasSet: async ({ id, fields }) => {
+    snap = { rev: snap.rev + 1, ideas: snap.ideas.map((i) => i.id === id ? { ...i, ...fields } : i) };
+    return snap;
+  },
+  launchPrefsGet: async () => launchState(),
+  launchPrefsSet: async (partial) => { prefs = { ...prefs, ...partial }; return { ok: true, ...launchState() }; },
+  boardPrefsGet: async () => ({ ...board }),
+  boardPrefsSet: async (partial) => { board = { ...board, ...partial }; return { ok: true, ...board }; },
+  ideasLaunch: async ({ action, id }) => {
+    const i = snap.ideas.find((x) => x.id === id);
+    // Mirror main: stamp a launch marker for the stage the card is in, so the
+    // running rail lights on any launchable card the way it does in the app.
+    const marker = { action, stage: i?.stage, at: Date.now() };
+    if (i) launches = { ...launches, [id]: marker };
+    return { ok: true, cli: prefs.cli, model: i?.model || prefs.model, effort: prefs.effort, marker };
+  },
+  ideaLaunchesGet: async () => ({ ...launches }),
+  ideaLaunchesClear: async (ids) => {
+    for (const id of ids || []) delete launches[id];
+    return { ...launches };
+  },
+  // Mirrors main's stageCommand closely enough to exercise the copy path:
+  // every entry in both maps there is literally `idea-<action>`.
+  ideasCommand: async ({ action, id }) => ({
+    ok: true, command: `/idea-${action} ${id}`, repo: 'workspace-dashboard-app',
+  }),
+  onIdeasChanged: (cb) => { onChanged = cb; },
+  onIdeasSync: () => {},
+  ideasSyncStatus: async () => ({ state: 'ok', pendingCaptures: 0, at: Date.now() }),
+};
+window.showToast = (msg) => {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+};
+window.copyText = (t) => navigator.clipboard?.writeText
+  ? navigator.clipboard.writeText(t).then(() => true).catch(() => false)
+  : Promise.resolve(false);
+window.showCopyOverlay = (t) => window.showToast(`clipboard blocked: ${t}`);
+window.renderMarkdown = (s) => `<p>${String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`;
+
+// Harness toolbar: state switch links and a "simulate a session finishing"
+// button that pushes a higher-rev snapshot through the live-update path, the
+// same path the file watcher uses, so stage-transition motion can be seen.
+const bar = document.getElementById('harness-bar');
+bar.innerHTML = Object.keys(FIXTURES).map((k) =>
+  `<a href="?state=${k}" class="${k === state ? 'on' : ''}">${k}</a>`).join('')
+  + `<a href="?state=${state}${skills ? '&skills=none' : ''}" class="${skills ? '' : 'on'}">skills=none</a>`
+  + '<span class="sp"></span>'
+  + '<button id="sim-finish">Simulate a session finishing</button>';
+document.getElementById('sim-finish').addEventListener('click', () => {
+  const b = snap.ideas.find((i) => i.stage === 'building');
+  if (!b || !onChanged) { window.showToast('No building card to advance'); return; }
+  const next = { rev: snap.rev + 1, ideas: snap.ideas.map((i) => i.id === b.id ? { ...i, stage: 'built', waitingOn: 'you' } : i) };
+  snap = next;
+  onChanged(next);
+});
+
+setIdeaProjects(PROJECTS);
+initIdeaActions();
+initIdeaDrag();
+subscribeIdeas();
+// Same order app.js uses: the sort and the launchable stages land before the first render.
+Promise.all([loadBoardPrefs(), loadLaunchPrefs()]).then(loadIdeas);
+</script>
+</body>
+</html>

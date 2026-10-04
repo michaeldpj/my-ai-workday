@@ -1,0 +1,7 @@
+# Paths that stay out of the public snapshot. One per line, and a trailing
+# slash means everything under that directory. Read by scripts/scrub-check.mjs
+# and by whoever cuts the public export.
+CLAUDE.md
+CHANGELOG.md
+docs/plans/
+workspace-dashboard-prompt.txt

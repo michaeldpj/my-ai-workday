@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timeline view preview</title>
+<!-- Stylesheet is injected with a cache-busting query below so edits show on reload. -->
+<style>
+  /* Harness chrome only. Not part of the app. */
+  #harness-bar{position:fixed;top:0;left:0;right:0;z-index:9000;display:flex;flex-wrap:wrap;gap:6px;
+    align-items:center;padding:8px 14px;background:#000;border-bottom:1px solid #30363d;font-size:12px;}
+  #harness-bar a{color:#8b949e;text-decoration:none;padding:3px 9px;border:1px solid #30363d;border-radius:6px;}
+  #harness-bar a.on{color:#0d1117;background:#e3b341;border-color:#e3b341;font-weight:700;}
+  #harness-bar .sp{flex:1;}
+  body{padding-top:44px;}
+</style>
+</head>
+<body data-view="timeline">
+<div id="harness-bar"></div>
+
+<div id="timeline-view">
+  <div class="tl-bar">
+    <select class="capture-sel" id="tl-range" title="Range">
+      <option value="14">2 weeks</option>
+      <option value="28" selected>4 weeks</option>
+      <option value="56">8 weeks</option>
+      <option value="84">12 weeks</option>
+    </select>
+    <div class="iss-chips" id="tl-projects" aria-label="Projects"></div>
+    <div class="seg iss-seg tl-kinds" id="tl-kinds" role="group" aria-label="Kinds">
+      <button type="button" data-kind="commit" class="on">Commits</button>
+      <button type="button" data-kind="session" class="on">Sessions</button>
+      <button type="button" data-kind="idea" class="on">Ideas</button>
+    </div>
+    <span class="tl-summary" id="tl-summary"></span>
+  </div>
+  <div id="tl-weeks"></div>
+</div>
+<div id="toast"></div>
+
+<script type="module">
+// Cache-bust the stylesheet and fixtures. Modules load by their plain path:
+// serve.mjs answers no-store, and a busted ideas-ui.js would be a second
+// instance beside the one timeline-ui.js imports, so its ideas would never show here.
+// The installed app never uses this file.
+const bust = `?t=${Date.now()}`;
+const link = document.createElement('link');
+link.rel = 'stylesheet';
+link.href = '../src/renderer/styles.css' + bust;
+document.head.appendChild(link);
+
+import(`./timeline-fixtures.js${bust}`).then(async ({ FIXTURES }) => {
+  const state = FIXTURES[new URL(location.href).searchParams.get('state')]
+    ? new URL(location.href).searchParams.get('state') : 'busy';
+  const fixture = FIXTURES[state];
+
+  window.showToast = (m) => console.log('toast:', m);
+  window.setView = (v) => console.log('setView:', v);
+  window.copyText = (t) => { console.log('copyText:', t); return Promise.resolve(true); };
+  const { shellRepoPath } = await import('../src/renderer/workspace-model.js');
+  window.repoPath = (r) => shellRepoPath(r, '~/github');
+  window.electronAPI = {
+    timelineLoad: async () => ({ commits: fixture.commits, sessions: fixture.sessions, prs: fixture.prs }),
+    ideasLoad: async () => ({ rev: 1, ideas: fixture.ideas }),
+    openExternal: async (u) => console.log('open:', u),
+  };
+  window.openIssue = (url) => console.log('openIssue:', url);
+
+  const ideas = await import('../src/renderer/ideas-ui.js');
+  await ideas.loadIdeas();
+  const ui = await import('../src/renderer/timeline-ui.js');
+  ui.setTimelineProjects([
+    { id: 'twig', name: 'Twig', repos: [{ name: 'twig.example.com' }] },
+    { id: 'twig-mobile', name: 'Twig Mobile', repos: [{ name: 'twig-app' }] },
+    { id: 'wda', name: 'Workspace Dashboard', repos: [{ name: 'workspace-dashboard-app' }] },
+  ]);
+  ui.initTimeline();
+  await ui.loadTimeline();
+
+  const bar = document.getElementById('harness-bar');
+  bar.innerHTML = Object.keys(FIXTURES).map((k) =>
+    `<a href="?state=${k}" class="${k === state ? 'on' : ''}">${k}</a>`).join('')
+    + '<span class="sp"></span>';
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "name": "my-ai-workday",
+  "productName": "My AI Workday",
+  "version": "0.1.0",
+  "description": "Workspace dashboard and idea pipeline for an AI-assisted working day",
+  "license": "MIT",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "vite build && electron .",
+    "dev:watch": "vite build --watch & electron . &",
+    "build": "vite build && electron-builder",
+    "vite:build": "vite build",
+    "install-app": "npm run build && (osascript -e 'quit app \"My Day\"' -e 'quit app \"My AI Workday\"' >/dev/null 2>&1; pkill -x \"My Day\"; pkill -x \"My AI Workday\"; true) && rm -rf \"/Applications/My Day.app\" \"/Applications/My AI Workday.app\" && cp -R \"release/mac-arm64/My AI Workday.app\" /Applications/ && /usr/bin/xattr -cr \"/Applications/My AI Workday.app\"",
+    "harness": "node dev/serve.mjs",
+    "test": "node --test src/main/*.test.js src/renderer/*.test.js scripts/*.test.mjs",
+    "scrub": "node scripts/scrub-check.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "electron-store": "^8.2.0",
+    "keytar": "^7.9.0"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8",
+    "vite": "^6.3.0"
+  }
+}

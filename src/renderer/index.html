@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'none';">
+<title>My AI Workday</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="hdr">
+  <div>
+    <h1>&#x1F5C2; My AI Workday</h1>
+    <div style="display:flex;align-items:center;gap:6px">
+      <span id="sync-dot" class="sync-dot" title="Sync: disconnected"></span>
+      <div id="sync-time" class="stale">Not yet scanned — click Scan</div>
+    </div>
+  </div>
+  <nav id="viewbar" aria-label="Views">
+    <button class="viewtab" data-goto="dashboard" onclick="setView('dashboard')">Dashboard</button>
+    <button class="viewtab" data-goto="ideas" onclick="setView('ideas')">Ideas<span id="ideas-badge" class="viewtab-badge"></span></button>
+    <button class="viewtab" data-goto="issues" onclick="setView('issues')">Issues</button>
+    <button class="viewtab" data-goto="timeline" onclick="setView('timeline')">Timeline</button>
+    <button class="viewtab" data-goto="summary" onclick="setView('summary')">Summary</button>
+    <button class="viewtab" data-goto="lists" onclick="setView('lists')">Lists</button>
+  </nav>
+  <div class="seg" id="scope-seg" role="group" aria-label="Project scope">
+    <button type="button" data-scope="work" onclick="setScope('work')">Work</button>
+    <button type="button" data-scope="personal" onclick="setScope('personal')">Personal</button>
+    <button type="button" data-scope="all" onclick="setScope('all')" class="on">All</button>
+  </div>
+  <div id="hdr-right">
+    <button id="dash-btn" class="btn btn-dash" onclick="openDashboard()" hidden>&#x1F4CA; Dashboard</button>
+    <button class="btn btn-briefing" onclick="openWeeklyDigest()">&#x1F4C5; Weekly</button>
+    <button class="btn btn-briefing" onclick="openBriefing()">&#x2728; Briefing</button>
+    <button id="scan-btn" class="btn btn-scan" onclick="scanAllRepos()">&#x27F3; Scan</button>
+  </div>
+</div>
+<div id="inbox-strip">
+  <input class="inbox-input" id="inbox-input" placeholder="Quick capture (&#x2318;N)..." onkeydown="if(event.key==='Enter')addToInbox()">
+  <button class="add-btn" onclick="addToInbox()" style="width:28px;height:28px;font-size:18px;">+</button>
+</div>
+<div id="main">
+  <div class="stats-row" id="stats-row"></div>
+  <div id="inbox-items"></div>
+  <div id="today-panel"></div>
+  <div id="done-today"></div>
+  <div id="attn"></div>
+  <div id="grid"></div>
+</div>
+<div id="ideas-view">
+  <div class="capture-row">
+    <input class="capture-input" id="idea-input" placeholder="Add an idea (&#x2318;I)..." autocomplete="off">
+    <select class="capture-sel" id="idea-project" title="Project"></select>
+    <select class="capture-sel" id="idea-impact" title="Impact">
+      <option value="">impact</option>
+      <option value="5">5 &middot; highest</option>
+      <option value="4">4</option>
+      <option value="3">3</option>
+      <option value="2">2</option>
+      <option value="1">1 &middot; lowest</option>
+    </select>
+    <select class="capture-sel" id="idea-effort" title="Your gut on the effort">
+      <option value="">effort</option>
+      <option value="low">low</option>
+      <option value="medium">medium</option>
+      <option value="high">high</option>
+    </select>
+    <select class="capture-sel" id="idea-model" title="Model for this idea's sessions. Empty follows the bar.">
+      <option value="">model</option>
+      <option value="fable">fable</option>
+      <option value="opus">opus</option>
+      <option value="sonnet">sonnet</option>
+      <option value="haiku">haiku</option>
+    </select>
+    <button class="capture-go" id="idea-add">Add</button>
+  </div>
+  <div class="ideas-bar">
+    <label class="mine-toggle"><input type="checkbox" id="mine-only" checked onchange="renderIdeas()"> Your move only</label>
+    <div class="bar-group" role="group" aria-label="Column sorting">
+      <span class="launch-label">sort</span>
+      <select class="capture-sel launch-sel" id="board-sort" title="How cards order inside each column">
+        <option value="impact">priority</option>
+        <option value="effort">effort</option>
+        <option value="project">project</option>
+      </select>
+    </div>
+    <span id="ideas-summary" class="ideas-summary"></span>
+    <span id="ideas-sync" class="ideas-sync" hidden></span>
+    <div class="bar-group" id="launch-group" role="group" aria-label="Launch settings">
+      <span class="launch-label">launch with</span>
+      <div class="seg" id="launch-cli">
+        <button type="button" data-cli="work" class="on">claude</button>
+        <button type="button" data-cli="personal">personal</button>
+      </div>
+      <select class="capture-sel launch-sel" id="launch-model" title="Default model">
+        <option value="fable">fable</option>
+        <option value="opus">opus</option>
+        <option value="sonnet">sonnet</option>
+        <option value="haiku">haiku</option>
+      </select>
+      <select class="capture-sel launch-sel" id="launch-reasoning" title="Reasoning level (claude --effort)">
+        <option value="low">low</option>
+        <option value="medium">medium</option>
+        <option value="high">high</option>
+        <option value="xhigh">xhigh</option>
+        <option value="max">max</option>
+      </select>
+    </div>
+    <label class="mine-toggle"><input type="checkbox" id="show-killed" onchange="renderIdeas()"> Show killed</label>
+  </div>
+  <div id="ideas-board"></div>
+</div>
+<div id="issues-view">
+  <aside class="iss-rail" aria-label="Issue filters">
+    <select class="capture-sel iss-project" id="iss-project" title="Project"></select>
+    <div class="seg iss-seg" id="iss-kind" role="group" aria-label="Kind">
+      <button type="button" data-kind="all" class="on">All</button>
+      <button type="button" data-kind="issue">Issues</button>
+      <button type="button" data-kind="journal">Journal</button>
+      <button type="button" data-kind="idea">Ideas</button>
+      <button type="button" data-kind="pr">PRs</button>
+      <button type="button" data-kind="other">Other</button>
+    </div>
+    <div class="seg iss-seg" id="iss-state" role="group" aria-label="State">
+      <button type="button" data-state="open" class="on">Open</button>
+      <button type="button" data-state="closed">Closed</button>
+      <button type="button" data-state="all">All</button>
+    </div>
+    <div class="iss-chips" id="iss-repos" aria-label="Repos"></div>
+    <div class="iss-chips" id="iss-labels" aria-label="Labels"></div>
+    <div class="iss-rail-foot">
+      <span id="iss-fetched" class="iss-fetched"></span>
+      <button type="button" class="btn iss-refresh" id="iss-refresh" title="Refresh (&#x2318;R)">&#x27F3;</button>
+    </div>
+  </aside>
+  <section class="iss-list" aria-label="Issues">
+    <div class="iss-list-bar">
+      <input class="capture-input iss-search" id="iss-search" placeholder="Search titles or #number (/)" autocomplete="off">
+      <select class="capture-sel" id="iss-sort" title="Sort">
+        <option value="updated">updated</option>
+        <option value="created">created</option>
+        <option value="comments">comments</option>
+        <option value="number">number</option>
+      </select>
+    </div>
+    <div id="iss-rows" class="iss-rows"></div>
+  </section>
+  <article class="iss-pane" id="iss-pane" aria-live="polite" tabindex="-1"></article>
+</div>
+<div id="timeline-view">
+  <div class="tl-bar">
+    <select class="capture-sel" id="tl-range" title="Range">
+      <option value="14">2 weeks</option>
+      <option value="28" selected>4 weeks</option>
+      <option value="56">8 weeks</option>
+      <option value="84">12 weeks</option>
+    </select>
+    <div class="iss-chips" id="tl-projects" aria-label="Projects"></div>
+    <div class="seg iss-seg tl-kinds" id="tl-kinds" role="group" aria-label="Kinds">
+      <button type="button" data-kind="commit" class="on">Commits</button>
+      <button type="button" data-kind="session" class="on">Sessions</button>
+      <button type="button" data-kind="pr" class="on">PRs</button>
+      <button type="button" data-kind="idea" class="on">Ideas</button>
+    </div>
+    <span class="tl-summary" id="tl-summary"></span>
+  </div>
+  <div id="tl-weeks"></div>
+</div>
+<div id="summary-view">
+  <div class="sum-bar">
+    <select class="capture-sel" id="sum-range" title="Range">
+      <option value="14">2 weeks</option>
+      <option value="28" selected>4 weeks</option>
+      <option value="56">8 weeks</option>
+      <option value="84">12 weeks</option>
+    </select>
+    <div class="iss-chips" id="sum-projects" aria-label="Projects"></div>
+    <span class="tl-summary" id="sum-summary"></span>
+  </div>
+  <div class="stats-row" id="sum-tiles"></div>
+  <div class="sum-bento" id="sum-figs"></div>
+  <div class="sum-health" id="sum-health"></div>
+</div>
+<div id="lists-view">
+  <div class="lists-divider">
+    <span>Personal &amp; Other Lists</span>
+    <button class="add-btn lists-add-btn" onclick="createList()" title="New list">+</button>
+  </div>
+  <div id="lists-grid"></div>
+</div>
+<div id="copy-overlay">
+  <div class="copy-box">
+    <h3 id="copy-title">&#x1F4CB; Copy this command</h3>
+    <p id="copy-desc">Select all and copy manually (&#x2318;A then &#x2318;C), then paste in Terminal.</p>
+    <textarea id="copy-ta" class="copy-ta" rows="10" readonly onclick="this.select()"></textarea>
+    <div class="copy-actions"><button class="copy-close" onclick="closeCopyOverlay()">Close</button></div>
+  </div>
+</div>
+<div id="briefing-overlay">
+  <div class="briefing-box">
+    <h3><span id="briefing-title">&#x2728; Daily Briefing</span> <span id="briefing-spinner"></span></h3>
+    <div class="briefing-content" id="briefing-content"></div>
+    <div class="briefing-actions"><button class="copy-close" onclick="closeBriefing()">Close</button></div>
+  </div>
+</div>
+<div id="settings-overlay">
+  <div class="settings-box">
+    <h3>&#x2699;&#xFE0F; Settings</h3>
+    <div class="settings-group">
+      <label>Anthropic API Key</label>
+      <input class="settings-input" id="settings-key" type="password" placeholder="sk-ant-..." autocomplete="off">
+    </div>
+    <div class="settings-group">
+      <label>Repo Folder</label>
+      <input class="settings-input" id="settings-github-path" type="text" placeholder="~/github" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="settings-group">
+      <label>Personal Claude Folder <span class="settings-hint">optional, a second Claude Code config folder for the Ideas bar's personal toggle</span></label>
+      <input class="settings-input" id="settings-claude-dir" type="text" placeholder="~/.claude-personal" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="settings-group">
+      <label>Dashboard Link <span class="settings-hint">optional, shows the header Dashboard button</span></label>
+      <input class="settings-input" id="settings-dashboard-url" type="url" placeholder="https://" autocomplete="off">
+    </div>
+    <div class="settings-group">
+      <label>Store Folder <span class="settings-hint">where this app and the ideas CLI keep their state</span></label>
+      <div class="settings-hint" id="settings-store-dir"></div>
+    </div>
+    <div class="settings-group">
+      <label>Sync Server URL</label>
+      <input class="settings-input" id="settings-sync-url" type="url" placeholder="https://sync.example.com" autocomplete="off">
+    </div>
+    <div class="settings-group">
+      <label>Sync Token</label>
+      <input class="settings-input" id="settings-sync-token" type="password" placeholder="Bearer token" autocomplete="off">
+    </div>
+    <div class="settings-group">
+      <label>Ideas Publish Token</label>
+      <input class="settings-input" id="settings-ideas-publish-token" type="password" placeholder="Mac-only publish token" autocomplete="off">
+    </div>
+    <div class="settings-group">
+      <label>Work Projects</label>
+      <div id="settings-work" class="settings-work"></div>
+    </div>
+    <div class="settings-actions">
+      <button class="settings-cancel" onclick="closeSettings()">Cancel</button>
+      <button class="settings-save" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+<div id="analyze-overlay">
+  <div class="analyze-box">
+    <h3>&#x26A1; Status Analysis <span id="analyze-spinner"></span></h3>
+    <div id="analyze-content"></div>
+    <div class="briefing-actions"><button class="copy-close" onclick="closeAnalyze()">Close</button></div>
+  </div>
+</div>
+<div id="decompose-overlay">
+  <div class="decompose-box">
+    <h3>&#x2935; Break Down Task <span id="decompose-spinner"></span></h3>
+    <div class="decompose-content" id="decompose-content"></div>
+    <div class="decompose-actions">
+      <button class="copy-close" onclick="closeDecompose()">Cancel</button>
+      <button class="settings-save" id="decompose-accept" onclick="acceptDecompose()" style="display:none">Accept Subtasks</button>
+    </div>
+  </div>
+</div>
+<div id="idea-overlay">
+  <div class="idea-box">
+    <h3 id="idea-title">Idea</h3>
+    <div class="idea-content" id="idea-content"></div>
+    <div class="idea-actions" id="idea-actions"></div>
+  </div>
+</div>
+<div id="toast"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

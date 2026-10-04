@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Issues view preview</title>
+<!-- Stylesheet is injected with a cache-busting query below so edits show on reload. -->
+<style>
+  /* Harness chrome only. Not part of the app. */
+  #harness-bar{position:fixed;top:0;left:0;right:0;z-index:9000;display:flex;flex-wrap:wrap;gap:6px;
+    align-items:center;padding:8px 14px;background:#000;border-bottom:1px solid #30363d;font-size:12px;}
+  #harness-bar a{color:#8b949e;text-decoration:none;padding:3px 9px;border:1px solid #30363d;border-radius:6px;}
+  #harness-bar a.on{color:#0d1117;background:#e3b341;border-color:#e3b341;font-weight:700;}
+  #harness-bar .sp{flex:1;}
+  body{padding-top:44px;}
+</style>
+</head>
+<body data-view="issues">
+<div id="harness-bar"></div>
+
+<div id="issues-view">
+  <aside class="iss-rail" aria-label="Issue filters">
+    <select class="capture-sel iss-project" id="iss-project" title="Project"></select>
+    <div class="seg iss-seg" id="iss-kind" role="group" aria-label="Kind">
+      <button type="button" data-kind="all" class="on">All</button>
+      <button type="button" data-kind="issue">Issues</button>
+      <button type="button" data-kind="journal">Journal</button>
+      <button type="button" data-kind="idea">Ideas</button>
+      <button type="button" data-kind="pr">PRs</button>
+      <button type="button" data-kind="other">Other</button>
+    </div>
+    <div class="seg iss-seg" id="iss-state" role="group" aria-label="State">
+      <button type="button" data-state="open" class="on">Open</button>
+      <button type="button" data-state="closed">Closed</button>
+      <button type="button" data-state="all">All</button>
+    </div>
+    <div class="iss-chips" id="iss-repos" aria-label="Repos"></div>
+    <div class="iss-chips" id="iss-labels" aria-label="Labels"></div>
+    <div class="iss-rail-foot">
+      <span id="iss-fetched" class="iss-fetched"></span>
+      <button type="button" class="btn iss-refresh" id="iss-refresh" title="Refresh (&#x2318;R)">&#x27F3;</button>
+    </div>
+  </aside>
+  <section class="iss-list" aria-label="Issues">
+    <div class="iss-list-bar">
+      <input class="capture-input iss-search" id="iss-search" placeholder="Search titles or #number (/)" autocomplete="off">
+      <select class="capture-sel" id="iss-sort" title="Sort">
+        <option value="updated">updated</option>
+        <option value="created">created</option>
+        <option value="comments">comments</option>
+        <option value="number">number</option>
+      </select>
+    </div>
+    <div id="iss-rows" class="iss-rows"></div>
+  </section>
+  <article class="iss-pane" id="iss-pane" aria-live="polite" tabindex="-1"></article>
+</div>
+<div id="toast"></div>
+
+<script type="module">
+// Cache-bust the stylesheet and fixtures. Modules load by their plain path:
+// serve.mjs answers no-store, and a busted ideas-ui.js would be a second
+// instance beside the one issues-ui.js imports, so its ideas would never show here.
+// The installed app never uses this file.
+const bust = `?t=${Date.now()}`;
+const link = document.createElement('link');
+link.rel = 'stylesheet';
+link.href = '../src/renderer/styles.css' + bust;
+document.head.appendChild(link);
+
+import(`./issues-fixtures.js${bust}`).then(async ({ FIXTURES }) => {
+  const state = FIXTURES[new URL(location.href).searchParams.get('state')]
+    ? new URL(location.href).searchParams.get('state') : 'mixed';
+
+  window.showToast = (m) => console.log('toast:', m);
+  window.setView = (v) => console.log('setView:', v);
+  window.electronAPI = {
+    issuesPrefsGet: async () => ({ projectId: 'twig', kind: 'all', state: 'all', sort: 'updated' }),
+    issuesPrefsSet: async () => ({ ok: true }),
+    issuesLoad: async () => FIXTURES[state],
+    issuesFetch: async () => FIXTURES[state],
+    issuesMarkRead: async () => {},
+    onIssuesChanged: () => () => {},
+    openExternal: async (u) => console.log('open:', u),
+    ideasLoad: async () => ({ rev: 1, ideas: [{ id: 'idea-1', stage: 'built', github: { url: 'https://github.com/example-user/twig.example.com/issues/39' } }] }),
+  };
+
+  const ideas = await import('../src/renderer/ideas-ui.js');
+  await ideas.loadIdeas();
+  const ui = await import('../src/renderer/issues-ui.js');
+  ui.setIssueProjects([{ id: 'twig', name: 'Twig' }, { id: 'hollow', name: 'Hollow' }]);
+  await ui.initIssues();
+
+  const bar = document.getElementById('harness-bar');
+  bar.innerHTML = Object.keys(FIXTURES).map((k) =>
+    `<a href="?state=${k}" class="${k === state ? 'on' : ''}">${k}</a>`).join('')
+    + '<span class="sp"></span>';
+});
+</script>
+</body>
+</html>

@@ -13,6 +13,7 @@ mac:
   category: public.app-category.developer-tools
   minimumSystemVersion: "13.0"
   identity: null
+afterPack: build/adhoc-sign.cjs
 extraResources:
   - from: build/icon.png
     to: icon.png

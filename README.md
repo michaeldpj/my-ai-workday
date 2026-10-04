@@ -46,6 +46,10 @@ The Electron main process sits at the center, taking IPC calls from the renderer
 - Optional: an Anthropic API key, for Briefing, Weekly, commit message suggestions and task breakdown.
 - Optional: Claude Code, for the Ideas board's stage skills and launch buttons. The skills ship in this repository as a Claude Code plugin, described under Claude Code skills below.
 
+## Download
+
+The [latest release](https://github.com/michaeldpj/my-ai-workday/releases/latest) has a DMG for Apple silicon Macs. Open it and drag My AI Workday into Applications. The app is ad-hoc signed and not notarized, so the first launch stops with a dialog saying Apple could not verify it. Click Done, open System Settings, go to Privacy & Security, and click Open Anyway beside the message about My AI Workday, which asks for your password once and opens the app from then on. Running `xattr -dr com.apple.quarantine "/Applications/My AI Workday.app"` in Terminal does the same thing without the dialog.
+
 ## Build from source
 
 ```bash
@@ -54,8 +58,9 @@ cd my-ai-workday
 npm install
 npm test
 npm run dev          # builds and opens the app
-npm run build        # unsigned app at release/mac-arm64/My AI Workday.app
+npm run build        # ad-hoc signed app at release/mac-arm64/My AI Workday.app
 npm run install-app  # build, copy to /Applications, clear the quarantine flag
+npm run dist         # ad-hoc signed DMG at release/My AI Workday-<version>-arm64.dmg
 ```
 
 `npm run dev` and the installed app read and write the same store folder, so anything you do in one shows up in the other.

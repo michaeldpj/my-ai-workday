@@ -14,7 +14,8 @@
     "harness": "node dev/serve.mjs",
     "test": "node --test src/main/*.test.js src/renderer/*.test.js scripts/*.test.mjs",
     "scrub": "node scripts/scrub-check.mjs",
-    "plugin:lib": "node scripts/sync-plugin-lib.mjs"
+    "plugin:lib": "node scripts/sync-plugin-lib.mjs",
+    "dist": "vite build && electron-builder --mac dmg --arm64"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

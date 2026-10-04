@@ -507,6 +507,7 @@ button.icard-live:focus-visible{outline:none;box-shadow:var(--ring);}
 .idea-form input:focus,.idea-form textarea:focus,.idea-form select:focus{outline:none;border-color:var(--active-bd);}
 .idea-form-row{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:10px;}
 .btn.primary{border-color:var(--active-bd);background:var(--active-bg);color:var(--active);}
+.btn.danger{border-color:var(--blocked-bd);background:var(--blocked-bg);color:var(--blocked);}
 #ideas-board.with-killed{grid-template-columns:repeat(6,minmax(200px,1fr));}
 
 /* ── IDEA CAPTURE ───────────────────────────────────────────────────────── */
@@ -643,10 +644,11 @@ body[data-view="issues"] #issues-view{display:grid;grid-template-columns:200px m
 .sum-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-bottom:10px;}
 .sum-swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle;}
 .sum-health{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);overflow-x:auto;box-shadow:var(--sh-1);}
-.sum-health table{width:100%;border-collapse:collapse;font-size:13px;}
-.sum-health th{text-align:left;padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);border-bottom:1px solid var(--border);}
-.sum-health td{padding:8px 16px;border-bottom:1px solid var(--border);}
-.sum-health tr:last-child td{border-bottom:none;}
+.sum-health table,.sum-dwell{width:100%;border-collapse:collapse;font-size:13px;}
+.sum-health th,.sum-dwell th{text-align:left;padding:10px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);border-bottom:1px solid var(--border);}
+.sum-health td,.sum-dwell td{padding:8px 16px;border-bottom:1px solid var(--border);}
+.sum-health tr:last-child td,.sum-dwell tr:last-child td{border-bottom:none;}
+.sum-note{font-size:11px;color:var(--muted);margin-top:8px;}
 .ch-commit{fill:var(--ch-commit);background:var(--ch-commit);}
 .ch-session{fill:var(--ch-session);background:var(--ch-session);}
 .ch-pr{fill:var(--ch-pr);background:var(--ch-pr);}

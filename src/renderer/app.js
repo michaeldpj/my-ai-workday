@@ -188,6 +188,11 @@ async function saveScope(partial) {
   if (!res.ok) { showToast(res.error); return; }
   applyScope(res);
   render();
+  renderDataView();
+}
+
+/** Repaint the Timeline or Summary when it is the open view, since both read ideas and scope. */
+function renderDataView() {
   if (document.body.dataset.view === 'timeline') renderTimeline();
   if (document.body.dataset.view === 'summary') renderSummary();
 }
@@ -519,7 +524,7 @@ function buildCard(p, idx) {
     return '<div><div class="repo-row" draggable="true" data-drag="repo" data-pid="' + esc(p.id) + '" data-idx="' + ri + '">' +
       '<span class="drag-handle">&#x2847;</span>' +
       '<span class="repo-name">' + esc(r.name) + '</span>' +
-      '<span class="ptag ptag-' + esc(r.platform) + ' clickable" onclick="openRepoEditor(\'' + jsAttr(p.id) + '\',' + ri + ',event)" title="Edit platform, ship, and build tracking">' + esc(r.platform) + '</span>' +
+      '<span class="ptag ptag-' + esc(r.platform) + ' clickable" onclick="openRepoEditor(\'' + jsAttr(p.id) + '\',' + ri + ',event)" title="Edit platform, ship, upstream, and build tracking">' + esc(r.platform) + '</span>' +
       '<span class="bdg ' + esc(r.status) + ' repo-bdg" onclick="openStatusPicker(\'' + jsAttr(p.id) + '\',' + ri + ',event)" title="Click to change status">' + esc(SL[r.status] || r.status) + '</span>' +
       buildPill +
       '<span class="repo-notes" title="' + esc(r.notes) + '">' + esc(r.notes) + '</span>' +
@@ -1135,6 +1140,7 @@ function paintRepoEditor() {
   el.innerHTML = '<div class="sp-divider">Platform</div>' + plat +
     '<div class="sp-divider">Options</div>' +
     checkRow('Ships with /ship', r.ship, flag + '\'ship\',') +
+    checkRow('Upstream clone', r.upstream, flag + '\'upstream\',') +
     checkRow('Track build', r.buildTracked, flag + '\'buildTracked\',') + deps;
 }
 
@@ -1150,13 +1156,15 @@ function setRepoPlatform(pid, ri, platform) {
 
 function setRepoFlag(pid, ri, key, on) {
   const r = ws.find(x => x.id === pid)?.repos[ri];
-  if (!r || !['ship', 'buildTracked'].includes(key)) return;
+  if (!r || !['ship', 'buildTracked', 'upstream'].includes(key)) return;
   r[key] = !!on;
   // A stale pill must not come back the next time tracking is turned on.
   if (key === 'buildTracked' && !on) r.buildStale = false;
   render();
   // The status rule reads ship (active versus needs-commit), so rescan quietly.
   if (key === 'ship') autoSave().then(() => scanAllRepos(true));
+  // Upstream changes what the rollups and the Today line count, so reload both.
+  else if (key === 'upstream') autoSave().then(() => { loadIssueCounts(); refreshActivity(); });
   else autoSave();
 }
 
@@ -1653,7 +1661,7 @@ async function init() {
   // Sort and launchable stages both have to be known before the board's
   // first render, or it sorts by the markup default and shows no launch
   // buttons, then repaints.
-  Promise.all([loadBoardPrefs(), loadLaunchPrefs()]).then(loadIdeas).then(() => { if (document.body.dataset.view === 'timeline') renderTimeline(); });
+  Promise.all([loadBoardPrefs(), loadLaunchPrefs()]).then(loadIdeas);
 
   window.electronAPI.onOpenSettings(() => openSettings());
   window.electronAPI.onTriggerRescan(() => {
@@ -1689,7 +1697,7 @@ async function init() {
 Object.assign(window, {
   // ideas-ui.js is a module and reaches these through window, same as the
   // inline onclick handlers do.
-  showToast, renderMarkdown, setView, renderGrid, showIssues: showProject,
+  showToast, renderMarkdown, setView, renderGrid, renderDataView, showIssues: showProject,
   // The ideas board copies slash commands, not shell lines, so it words its own
   // toast rather than reusing copyToast's "paste in Terminal".
   copyText, showCopyOverlay,

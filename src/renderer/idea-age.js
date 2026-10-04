@@ -110,3 +110,33 @@ export function launchStale(marker, now = Date.now()) {
   const age = launchAge(marker, now);
   return age !== null && age >= LAUNCH_STALE_MINUTES * MINUTE;
 }
+
+/**
+ * When the idea last entered `built`, as the ISO stamp, falling back to
+ * `updatedAt`, or '' when neither exists. A string rather than epoch ms,
+ * because the age pill's tier comes from repo-age.js's ageTier, which parses
+ * one, and the sort and the pill must read the same value.
+ */
+export function builtStamp(idea) {
+  return enteredStageStamp(idea?.history, 'built') || idea?.updatedAt || '';
+}
+
+/** How long a built card has waited, in ms, or null if it cannot be told. */
+export function builtAge(idea, now = Date.now()) {
+  const since = toMs(builtStamp(idea));
+  return since === null ? null : Math.max(0, now - since);
+}
+
+/**
+ * The Done column's order: built cards first, longest waiting first, then
+ * the shipped cards in the board's own comparator. Built cards break a tie on
+ * createdAt like every board sort, so FLIP never animates a card that did not
+ * move, and one whose stamp cannot be read goes last among them.
+ */
+export function orderDone(rows, cmp) {
+  const t = (i) => toMs(builtStamp(i)) ?? Infinity;
+  const created = (i) => i?.createdAt || '';
+  const built = rows.filter((i) => i.stage === 'built')
+    .sort((a, b) => (t(a) - t(b)) || created(a).localeCompare(created(b)));
+  return [...built, ...rows.filter((i) => i.stage !== 'built').sort(cmp)];
+}

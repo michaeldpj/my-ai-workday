@@ -64,7 +64,8 @@
         <button type="button" data-cli="work" class="on">claude</button>
         <button type="button" data-cli="personal">personal</button>
       </div>
-      <select class="capture-sel launch-sel" id="launch-model" title="Default model">
+      <select class="capture-sel launch-sel" id="launch-model" title="Default model. policy picks per stage: Fable 5.1 medium for a high plan, Opus 5.5 high for other plans, Opus 5.5 medium for everything else">
+        <option value="policy">policy</option>
         <option value="fable">fable</option>
         <option value="opus">opus</option>
         <option value="sonnet">sonnet</option>
@@ -115,7 +116,7 @@ let onChanged = null;
 // stage skills installed: no toggle, no launch group, no launch buttons.
 const ALL_LAUNCH = ['brainstorm', 'plan', 'review', 'execute', 'ship', 'reset', 'revise', 'reopen'];
 const skills = params.get('skills') !== 'none';
-let prefs = { cli: 'work', model: 'fable', effort: 'medium' };
+let prefs = { cli: 'work', model: 'policy', effort: 'medium' };
 const launchState = () => ({ ...prefs, personal: skills, launchable: skills ? ALL_LAUNCH : [] });
 let board = { sort: 'impact' };
 let launches = {};
@@ -130,8 +131,11 @@ document.getElementById('show-killed').checked = state === 'killed';
 window.electronAPI = {
   ideasLoad: async () => snap,
   ideasAdd: async () => ({ ...snap }),
-  ideasMove: async ({ id, to }) => {
-    snap = { rev: snap.rev + 1, ideas: snap.ideas.map((i) => i.id === id ? { ...i, stage: to } : i) };
+  ideasMove: async ({ id, to, note }) => {
+    // Mirrors the store: every kill needs a reason.
+    if (to === 'killed' && !note) return { ok: false, error: 'moving to killed requires a reason' };
+    snap = { rev: snap.rev + 1, ideas: snap.ideas.map((i) => i.id === id
+      ? { ...i, stage: to, ...(to === 'killed' ? { killedReason: note, waitingOn: '-' } : {}) } : i) };
     return snap;
   },
   ideasSet: async ({ id, fields }) => {
@@ -142,7 +146,10 @@ window.electronAPI = {
   launchPrefsSet: async (partial) => { prefs = { ...prefs, ...partial }; return { ok: true, ...launchState() }; },
   boardPrefsGet: async () => ({ ...board }),
   boardPrefsSet: async (partial) => { board = { ...board, ...partial }; return { ok: true, ...board }; },
-  ideasLaunch: async ({ action, id }) => {
+  ideasLaunch: async ({ action, id, force }) => {
+    if (params.get('live') === '1' && !force) {
+      return { ok: false, live: { worktree: `idea-x-${id}`, branch: `claude/idea-x-${id}`, pid: 4242 }, error: 'a session (pid 4242) is still running' };
+    }
     const i = snap.ideas.find((x) => x.id === id);
     // Mirror main: stamp a launch marker for the stage the card is in, so the
     // running rail lights on any launchable card the way it does in the app.

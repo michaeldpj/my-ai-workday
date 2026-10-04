@@ -5,7 +5,7 @@
  * modelled on timeline-ui.js.
  */
 import { buildEntries, filterEntries, weekStart, repoProjectMap, TIMELINE_RANGES, DEFAULT_RANGE } from './timeline-model.js';
-import { dayBuckets, countByProject, prWeeks, issueFlow, repoHealth, activitySummary, SUMMARY_KINDS, SUMMARY_LABELS } from './summary-model.js';
+import { dayBuckets, countByProject, prWeeks, issueFlow, pipelineFlow, repoHealth, activitySummary, SUMMARY_KINDS, SUMMARY_LABELS } from './summary-model.js';
 import { barStrip, hBars, pairedWeeks, stackedRows } from './charts.js';
 import { allIdeas } from './ideas-ui.js';
 import { esc } from './text.js';
@@ -87,6 +87,19 @@ function statTile(icon, num, label) {
   return `<div class="stat"><div class="stat-icon">${icon}</div><div><div class="stat-num">${num}</div><div class="stat-lbl">${esc(label)}</div></div></div>`;
 }
 
+function flowNote(flow) {
+  const { created, shipped, killed } = flow.totals;
+  const bulk = flow.bulkDays.length
+    ? ' \u00b7 bulk closes: ' + [...flow.bulkDays].reverse().map((d) => `${weekLabelShort(d.date)} (${d.count})`).join(', ')
+    : '';
+  return `<div class="sum-note">${esc(`${created} created, ${shipped} shipped, ${killed} killed${bulk}`)}</div>`;
+}
+
+function dwellTable(dwell) {
+  const rows = dwell.map((d) => `<tr><td>${esc(d.stage)}</td><td>${esc(formatAge(d.median))}</td><td>${esc(formatAge(d.p90))}</td><td>${esc(d.n)}</td><td>${d.open ? esc(d.open) : ''}</td></tr>`).join('');
+  return `<table class="sum-dwell"><thead><tr><th>Stage</th><th>Median</th><th>p90</th><th>Visits</th><th>Waiting now</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 function healthRow(r) {
   const age = r.signal ? `<span class="age-pill ${r.tier}" title="${esc(r.signal.kind === 'branch' ? 'branch ' + r.signal.branch : r.signal.kind)} since ${esc(r.signal.at.slice(0, 10))}">${formatAge(Date.now() - Date.parse(r.signal.at))}</span>` : '';
   return `<tr><td>${esc(r.repo)}</td><td>${esc(projectName(r.projectId))}</td><td><span class="bdg ${esc(r.status)}">${esc(r.status)}</span></td><td>${age}</td><td>${esc(r.uncommitted)}</td><td>${esc(r.unpushed)}</td><td>${r.branches}</td></tr>`;
@@ -102,16 +115,16 @@ export function renderSummary() {
   const allEntries = raw ? buildEntries({ commits: raw.commits, sessions: raw.sessions, prs: raw.prs, ideas: allIdeas(), repoProject, since: raw.since }) : [];
   const entries = filterEntries(allEntries, { kinds: SUMMARY_KINDS }).filter((e) => shown(e.projectId));
   const issues = (raw?.issues || []).filter((i) => shown(repoProject[i.repo]));
+  const flow = pipelineFlow(allIdeas().filter((i) => shown(i.projectId || '')), range);
 
   const tiles = document.getElementById('sum-tiles');
   if (tiles) {
     const merged = entries.filter((e) => e.status === 'merged').length;
-    const shipped = entries.filter((e) => e.stage === 'built').length;
     tiles.innerHTML =
       statTile('&#x1F4E6;', entries.filter((e) => e.kind === 'commit').length, 'Commits') +
       statTile('&#x1F500;', merged, 'PRs merged') +
       statTile('&#x1F4DD;', entries.filter((e) => e.kind === 'session').length, 'Sessions') +
-      statTile('&#x1F680;', shipped, 'Ideas shipped');
+      statTile('&#x1F680;', flow.totals.shipped, 'Ideas shipped');
   }
 
   const figs = document.getElementById('sum-figs');
@@ -125,7 +138,9 @@ export function renderSummary() {
       fig('Commits by project', hBars({ rows: countByProject(entries, 'commit').map((r) => ({ label: projectName(r.projectId), value: r.count })) })) +
       fig('Activity mix by week', barStrip({ series: SUMMARY_KINDS.map((k) => ({ key: k, values: weeks.map((w) => w[k]) })), labels: weeks.map((w) => w.label), labelEvery: 1 }), legend(SUMMARY_KINDS.map((k) => [k, SUMMARY_LABELS[k]]))) +
       fig('PR throughput', pairedWeeks({ weeks: pw.map((w) => ({ label: weekLabelShort(w.weekStart), a: w.opened, b: w.merged })), keys: ['pr', 'idea'] }), legend([['pr', 'Opened'], ['idea', 'Merged']])) +
-      fig('Issues by project', stackedRows({ rows: issueFlow(issues, repoProject, raw?.since || '').map((r) => ({ label: projectName(r.projectId), parts: [{ key: 'commit', value: r.opened }, { key: 'pr', value: r.closed }, { key: 'idea', value: r.open }] })) }), legend([['commit', 'Opened'], ['pr', 'Closed'], ['idea', 'Open']]));
+      fig('Issues by project', stackedRows({ rows: issueFlow(issues, repoProject, raw?.since || '').map((r) => ({ label: projectName(r.projectId), parts: [{ key: 'commit', value: r.opened }, { key: 'pr', value: r.closed }, { key: 'idea', value: r.open }] })) }), legend([['commit', 'Opened'], ['pr', 'Closed'], ['idea', 'Open']])) +
+      fig('Pipeline flow', pairedWeeks({ weeks: flow.weeks.map((w) => ({ label: weekLabelShort(w.weekStart), a: w.created, b: w.shipped })), keys: ['pr', 'idea'] }) + flowNote(flow), legend([['pr', 'Created'], ['idea', 'Shipped']])) +
+      fig('Stage dwell', dwellTable(flow.dwell));
   }
 
   const health = document.getElementById('sum-health');

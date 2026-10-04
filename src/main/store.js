@@ -6,10 +6,12 @@ import { DEFAULT_SORT } from '../renderer/idea-sort.js';
 import { DEFAULT_ISSUE_PREFS } from '../renderer/issue-model.js';
 import { DEFAULT_SCOPE, DEFAULT_WORK } from '../renderer/scope-model.js';
 import { storeDir, CONFIG_NAME } from '../../scripts/store-dir.mjs';
+import { POLICY } from './terminal.js';
 
 // A fresh install starts empty. Existing configs keep their own workspace, since conf fills only missing keys.
 export const DEFAULT_WS = [];
 export const DEFAULT_LISTS = [];
+const DEFAULT_LAUNCH_PREFS = Object.freeze({ cli: 'work', model: POLICY, effort: 'medium' });
 
 let store;
 
@@ -23,7 +25,7 @@ export function initStore() {
       githubPath: '~/github',
       previousHashes: {},
       staleBaselines: {},
-      launchPrefs: { cli: 'work', model: 'fable', effort: 'medium' },
+      launchPrefs: { ...DEFAULT_LAUNCH_PREFS },
       boardPrefs: { sort: DEFAULT_SORT },
       scopePrefs: { scope: DEFAULT_SCOPE, work: DEFAULT_WORK },
       issuesPrefs: DEFAULT_ISSUE_PREFS,
@@ -32,6 +34,7 @@ export function initStore() {
     },
   });
   store.delete('issuesCache');
+  adoptLaunchPolicy(store);
   return store;
 }
 
@@ -135,7 +138,22 @@ export function saveAttentionSince(map) {
 
 /** Which CLI, model, and reasoning level a stage launch uses. Validated in the IPC handler, not here. */
 export function getLaunchPrefs() {
-  return { cli: 'work', model: 'fable', effort: 'medium', ...store.get('launchPrefs', {}) };
+  return { ...DEFAULT_LAUNCH_PREFS, ...store.get('launchPrefs', {}) };
+}
+
+/** Top-level config key recording that the one-time switch to policy has run. */
+export const POLICY_MARK = 'launchPolicyAdopted';
+
+/**
+ * Once per config, put the bar on the per-stage policy, so the change ships
+ * live for a config that already stored a model. The marker is what keeps a
+ * later explicit choice: this never runs twice. Takes the store as an
+ * argument so it tests without Electron.
+ */
+export function adoptLaunchPolicy(s) {
+  if (s.get(POLICY_MARK)) return;
+  s.set('launchPrefs', { ...DEFAULT_LAUNCH_PREFS, ...s.get('launchPrefs', {}), model: POLICY });
+  s.set(POLICY_MARK, true);
 }
 
 export function setLaunchPrefs(prefs) {

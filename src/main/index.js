@@ -20,8 +20,7 @@ import { suggestCommitMessage, getDailyBriefing, suggestFocusLine, analyzeStatus
 import { startSync, stopSync, debouncedPush, pullState, getSyncStatus } from './sync.js';
 import { snapshot as ideasSnapshot, addIdea, moveIdea, setIdea, startWatching as startIdeasWatch } from './ideas.js';
 import { startIdeasSync, stopIdeasSync, publishSoon, getIdeasSyncStatus } from './ideas-sync.js';
-import { launchSession, resolveLaunchRepo, stageCommand, worktreeName, sessionName, CLI_KEYS, claudeConfigDir, launchableActions, EFFORTS } from './terminal.js';
-import { MODELS } from '../../scripts/idea-fields.mjs';
+import { launchSession, resolveLaunchRepo, stageCommand, worktreeName, sessionName, CLI_KEYS, claudeConfigDir, launchableActions, EFFORTS, LAUNCH_MODELS, resolveModel } from './terminal.js';
 import { configPath, storeDir } from '../../scripts/store-dir.mjs';
 import { fetchProjectIssues } from './issues.js';
 import { projectSnapshot, activityRows, openCounts } from './issues-store.js';
@@ -36,7 +35,7 @@ import { SORT_MODES } from '../renderer/idea-sort.js';
 import { SCOPES } from '../renderer/scope-model.js';
 import { isStale } from '../renderer/repo-age.js';
 import { launchActive } from '../renderer/idea-age.js';
-import { WORKSPACE_ID, validateWorkspace, filterStatusSuggestions } from '../renderer/workspace-model.js';
+import { WORKSPACE_ID, validateWorkspace, filterStatusSuggestions, ownProjects, repoNames } from '../renderer/workspace-model.js';
 
 let win = null;
 let tray = null;
@@ -49,7 +48,12 @@ const TOKEN_MASK = '••••••••';
 let _appIcon;
 /** Every repo name across the workspace that may become a path or an argument. */
 function allRepoNames() {
-  return (loadState()?.ws || []).flatMap((p) => p.repos.map((r) => r.name)).filter(safeRepoName);
+  return repoNames(loadState()?.ws);
+}
+
+/** Every repo but upstream clones, for the figures, rollups and loops that count the user's own work. */
+function ownRepoNames() {
+  return repoNames(ownProjects(loadState()?.ws));
 }
 
 function getAppIcon() {
@@ -308,15 +312,17 @@ function registerIPC() {
   ipcMain.handle('ideas-set', (_e, payload) => withPublish(setIdea(payload)));
   ipcMain.handle('launch-prefs-get', () => launchState());
 
-  // Each key is checked against the same enum buildCommand checks, so a value
-  // that lands in the store is by construction one the launcher accepts.
+  // Each key is checked against an enum. A stored cli or effort is one
+  // buildCommand accepts, and a stored model is an alias it accepts or
+  // `policy`, which resolveModel turns into a pinned id it accepts
+  // (terminal.test.js holds that for every action and rating).
   ipcMain.handle('launch-prefs-set', (_e, partial) => {
     const next = { ...getLaunchPrefs() };
     for (const [key, val] of Object.entries(partial || {})) {
       if (key === 'cli' && CLI_KEYS.includes(val)) {
         if (val === 'personal' && !getPersonalClaudeDir()) return { ok: false, error: 'Set a personal Claude folder in Settings first' };
         next.cli = val;
-      } else if (key === 'model' && MODELS.includes(val)) next.model = val;
+      } else if (key === 'model' && LAUNCH_MODELS.includes(val)) next.model = val;
       else if (key === 'effort' && EFFORTS.includes(val)) next.effort = val;
       else return { ok: false, error: `${key} cannot be "${val}"` };
     }
@@ -390,7 +396,7 @@ function registerIPC() {
   });
 
   ipcMain.handle('issues-counts', () => {
-    return openCounts(allRepoNames());
+    return openCounts(ownRepoNames());
   });
 
   ipcMain.handle('issues-fetch', async (_e, projectId) => {
@@ -411,7 +417,7 @@ function registerIPC() {
   // One payload for the Timeline and the Summary: commits from git, and
   // every row kind from a single read of the issue files, cut to the range.
   async function activityLoad(range) {
-    const repos = allRepoNames();
+    const repos = ownRepoNames();
     const cutoff = new Date(Date.now() - range * 86400000).toISOString();
     const [commits, rows] = await Promise.all([getCommitLog(repos, getGithubPath(), range), activityRows(repos)]);
     return {
@@ -432,20 +438,22 @@ function registerIPC() {
     return true;
   });
 
-  ipcMain.handle('ideas-launch', async (_e, { action, id }) => {
+  ipcMain.handle('ideas-launch', async (_e, { action, id, force } = {}) => {
     const { ideas } = ideasSnapshot();
     const idea = ideas.find(i => i.id === id);
     if (!idea) return { ok: false, error: `no idea ${id}` };
     const { repo, error } = resolveLaunchRepo(idea, loadState()?.ws);
     if (error) return { ok: false, error };
     const prefs = getLaunchPrefs();
+    const { model, effort } = resolveModel({ action, planEffort: idea.planEffort, ideaModel: idea.model, prefs });
     const res = await launchSession(action, idea.id, repo, getGithubPath(), {
       cli: prefs.cli,
       personalDir: getPersonalClaudeDir(),
-      model: idea.model || prefs.model,
-      effort: prefs.effort,
+      model,
+      effort,
       worktree: worktreeName(idea.title, idea.id),
       name: sessionName(idea.title, idea.id),
+      force: force === true,
     });
     if (res?.ok === false) return res;
     // Stamp the running rail: the stage the session was fired from, so it clears
@@ -570,10 +578,8 @@ function registerIPC() {
     const apiKey = await getAIKey();
     if (!apiKey) return { error: 'No API key set' };
     try {
-      const state = loadState();
-      const allRepos = state?.ws?.flatMap(p => p.repos.map(r => r.name)) || [];
-      const weeklyLog = await getWeeklyLog(allRepos, getGithubPath());
-      await getWeeklyDigest(wsData, weeklyLog, apiKey, win);
+      const weeklyLog = await getWeeklyLog(ownRepoNames(), getGithubPath());
+      await getWeeklyDigest(ownProjects(wsData), weeklyLog, apiKey, win);
     } catch (err) {
       return { error: err.message };
     }
@@ -639,7 +645,7 @@ function registerIPC() {
     if (!res.ok) return res;
     setAppSettings(res.next);
     if (!res.next.personalClaudeDir && getLaunchPrefs().cli === 'personal') setLaunchPrefs({ ...getLaunchPrefs(), cli: 'work' });
-    if (res.next.githubPath !== before.githubPath) startIssuesSync(() => win, allRepoNames, getGithubPath());
+    if (res.next.githubPath !== before.githubPath) startIssuesSync(() => win, ownRepoNames, allRepoNames, getGithubPath());
     return { ok: true, ...res.next };
   });
 
@@ -707,7 +713,7 @@ app.whenReady().then(() => {
   createWindow();
   startSync(win);
   beginIdeasSync(() => win);
-  startIssuesSync(() => win, allRepoNames, getGithubPath());
+  startIssuesSync(() => win, ownRepoNames, allRepoNames, getGithubPath());
 
   const dockIcon = getAppIcon();
   if (dockIcon && app.dock) app.dock.setIcon(dockIcon);

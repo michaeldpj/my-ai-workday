@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveLaunchRepo, stageCommand } from './terminal.js';
-import { safeRepoName } from './git.js';
+import { safeRepoName, listWorktrees } from './git.js';
 
 const WS = [
   { id: 'hollow', name: 'Hollow', repos: [{ name: 'hollow-app' }, { name: 'hollow.example.com' }] },
@@ -79,7 +79,9 @@ test('stageCommand refuses what the launcher refuses', () => {
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CLI_KEYS, EFFORTS, worktreeName, sessionName, buildCommand, claudeConfigDir, launchableActions, launchableSkills, pluginSkillRoots, launchSession } from './terminal.js';
+import { execFileSync } from 'node:child_process';
+import { CLI_KEYS, EFFORTS, worktreeName, sessionName, buildCommand, claudeConfigDir, launchableActions, launchableSkills, pluginSkillRoots, launchSession, POLICY, PINNED_MODELS, LAUNCH_MODELS, LAUNCH_ACTIONS, resolveModel, liveWorktree } from './terminal.js';
+import { MODELS } from '../../scripts/idea-fields.mjs';
 
 const PARTS = {
   cwd: '/Users/me/github/hollow-app', cli: 'work', model: 'fable', effort: 'medium',
@@ -144,14 +146,15 @@ test('launchSession refuses a stage whose skill the chosen CLI lacks, before any
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('buildCommand accepts every model and effort the enums list', () => {
-  for (const model of ['fable', 'opus', 'sonnet', 'haiku']) {
+test('buildCommand accepts every alias, every pinned id, and every effort', () => {
+  for (const model of [...MODELS, ...PINNED_MODELS]) {
     assert.ok(buildCommand({ ...PARTS, model }).command.includes(`--model ${model} `));
   }
   for (const effort of EFFORTS) {
     assert.ok(buildCommand({ ...PARTS, effort }).command.includes(`--effort ${effort} `));
   }
   assert.deepEqual(EFFORTS, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(PINNED_MODELS, ['claude-opus-5-5', 'claude-fable-5-1']);
 });
 
 test('buildCommand quotes a directory with a space', () => {
@@ -162,10 +165,96 @@ test('buildCommand quotes a directory with a space', () => {
 test('buildCommand refuses anything off the enums', () => {
   assert.match(buildCommand({ ...PARTS, cli: 'root' }).error, /unknown cli/);
   assert.match(buildCommand({ ...PARTS, cli: 'constructor' }).error, /unknown cli/);
-  assert.match(buildCommand({ ...PARTS, model: 'claude-fable-5-1' }).error, /unknown model/);
+  assert.match(buildCommand({ ...PARTS, model: 'claude-opus-5-0' }).error, /unknown model/);
+  assert.match(buildCommand({ ...PARTS, model: POLICY }).error, /unknown model/);
+  assert.match(buildCommand({ ...PARTS, model: 'claude-opus-5-5 --dangerously' }).error, /unknown model/);
   assert.match(buildCommand({ ...PARTS, effort: 'ultra' }).error, /unknown effort/);
   assert.match(buildCommand({ ...PARTS, worktree: 'idea x; rm -rf /' }).error, /malformed worktree/);
   assert.match(buildCommand({ ...PARTS, worktree: '' }).error, /malformed worktree/);
+});
+
+const P = (model, effort = 'low') => ({ model, effort });
+
+test('policy plans a high idea on Fable 5.1 at medium', () => {
+  assert.deepEqual(resolveModel({ action: 'plan', planEffort: 'high', ideaModel: null, prefs: P(POLICY) }),
+    { model: 'claude-fable-5-1', effort: 'medium' });
+});
+
+test('policy plans a low, medium or unrated idea on Opus 5.5 at high', () => {
+  for (const planEffort of ['low', 'medium', null, undefined]) {
+    assert.deepEqual(resolveModel({ action: 'plan', planEffort, ideaModel: null, prefs: P(POLICY) }),
+      { model: 'claude-opus-5-5', effort: 'high' });
+  }
+});
+
+test('policy runs every other stage on Opus 5.5 at medium, whatever the rating', () => {
+  for (const action of LAUNCH_ACTIONS.filter((a) => a !== 'plan')) {
+    assert.deepEqual(resolveModel({ action, planEffort: 'high', ideaModel: null, prefs: P(POLICY) }),
+      { model: 'claude-opus-5-5', effort: 'medium' }, action);
+  }
+});
+
+test('an idea model replaces the policy model and keeps the stage reasoning', () => {
+  assert.deepEqual(resolveModel({ action: 'plan', planEffort: 'low', ideaModel: 'sonnet', prefs: P(POLICY) }),
+    { model: 'sonnet', effort: 'high' });
+});
+
+test('an alias on the bar behaves as before: idea model first, bar reasoning', () => {
+  assert.deepEqual(resolveModel({ action: 'plan', planEffort: 'high', ideaModel: null, prefs: P('opus', 'xhigh') }),
+    { model: 'opus', effort: 'xhigh' });
+  assert.deepEqual(resolveModel({ action: 'execute', planEffort: 'high', ideaModel: 'haiku', prefs: P('fable') }),
+    { model: 'haiku', effort: 'low' });
+});
+
+test('every bar model, action and rating resolves to a command buildCommand accepts', () => {
+  for (const model of LAUNCH_MODELS) {
+    for (const action of LAUNCH_ACTIONS) {
+      for (const planEffort of [null, 'low', 'medium', 'high']) {
+        const r = resolveModel({ action, planEffort, ideaModel: null, prefs: P(model, 'medium') });
+        assert.equal(buildCommand({ ...PARTS, ...r }).ok, true, `${model} ${action} ${planEffort}`);
+      }
+    }
+  }
+  assert.deepEqual(LAUNCH_MODELS, ['policy', ...MODELS]);
+});
+
+const WT = (over) => ({ path: '/r/.claude/worktrees/idea-dark-mode-c3d4', branch: 'claude/idea-dark-mode-c3d4',
+  detached: false, locked: 'claude session idea-dark-mode-c3d4 (pid 4242 start x)', prunable: false, inUse: true, ...over });
+
+test('liveWorktree names the worktree, branch and pid of a live session on the idea', () => {
+  assert.deepEqual(liveWorktree([WT()], 'idea-dark-mode-c3d4'),
+    { worktree: 'idea-dark-mode-c3d4', branch: 'claude/idea-dark-mode-c3d4', pid: 4242 });
+});
+
+test('liveWorktree ignores a dead lock, another idea, and an empty list', () => {
+  assert.equal(liveWorktree([WT({ inUse: false })], 'idea-dark-mode-c3d4'), null);
+  assert.equal(liveWorktree([WT()], 'idea-dark-mode-c3d5'), null);
+  assert.equal(liveWorktree([], 'idea-dark-mode-c3d4'), null);
+  assert.equal(liveWorktree(undefined, 'idea-dark-mode-c3d4'), null);
+});
+
+test('launchSession refuses, before any terminal opens, when the idea worktree is held by a live pid', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'live-'));
+  const repo = path.join(base, 'hollow-app');
+  const g = (...a) => execFileSync('git', ['-C', repo, ...a], { stdio: 'ignore' });
+  execFileSync('git', ['init', '-q', '-b', 'main', repo], { stdio: 'ignore' });
+  g('config', 'user.email', 'test@example.com');
+  g('config', 'user.name', 'Test');
+  g('commit', '-q', '--allow-empty', '-m', 'first');
+  const wt = path.join(repo, '.claude', 'worktrees', 'idea-dark-mode-c3d4');
+  g('worktree', 'add', '-q', '-b', 'claude/idea-dark-mode-c3d4', wt);
+  g('worktree', 'lock', '--reason', `claude session idea-dark-mode-c3d4 (pid ${process.pid} start x)`, wt);
+  const cfg = fakeConfig({ userSkills: ['idea-plan'] });
+  // The check fails open, so a git failure here would let launchSession reach
+  // osascript. Prove git lists the lock before launching.
+  assert.ok(liveWorktree(await listWorktrees(repo), 'idea-dark-mode-c3d4'), 'git must list the locked worktree');
+  const res = await launchSession('plan', 'idea-a1b2-c3d4', 'hollow-app', base,
+    { ...PARTS, cli: 'personal', personalDir: cfg });
+  assert.equal(res.ok, false);
+  assert.deepEqual(res.live, { worktree: 'idea-dark-mode-c3d4', branch: 'claude/idea-dark-mode-c3d4', pid: process.pid });
+  assert.match(res.error, /still running in idea-dark-mode-c3d4/);
+  fs.rmSync(base, { recursive: true, force: true });
+  fs.rmSync(cfg, { recursive: true, force: true });
 });
 
 test('worktreeName slugs the title and keeps the id tail', () => {

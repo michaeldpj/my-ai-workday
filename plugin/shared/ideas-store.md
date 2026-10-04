@@ -101,8 +101,9 @@ Legal moves and who may make them are declared in `ideas-store.mjs`
 (`TRANSITIONS`). Do not reimplement them. Call `ideas move` and read the error:
 a refusal always names the current stage and what would advance it.
 
-Three moves require `--note`: `planned`/`reviewed` back to `shaped` (revise),
-`building` back to `queued` (reset), and `killed` back to `inbox` (reopen).
+Four kinds of move require `--note`: `planned`/`reviewed` back to `shaped`
+(revise), `building` back to `queued` (reset), `killed` back to `inbox`
+(reopen), and every move into `killed`, whose note is the kill reason.
 
 ## Gates the CLI enforces for you
 

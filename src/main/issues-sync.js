@@ -7,7 +7,7 @@ const TICK_MS = 10 * 60_000;
 let timer = null;
 let running = false;
 
-async function tick(getWin, getRepos, basePath) {
+async function tick(getWin, getRepos, getKeep, basePath) {
   if (running || !(await haveGh())) return;
   running = true;
   const changed = [];
@@ -18,7 +18,9 @@ async function tick(getWin, getRepos, basePath) {
       const r = await syncRepoIssues(name, basePath);
       if (r.ok && r.changed) changed.push(name);
     }
-    await pruneIssueFiles(getRepos());
+    // Prune against every workspace repo, not only the synced ones, so an
+    // upstream clone's file stays for its Issues view to open on demand.
+    await pruneIssueFiles(getKeep());
   } finally { running = false; }
   const w = getWin();
   if (changed.length && w && !w.isDestroyed()) {
@@ -26,11 +28,11 @@ async function tick(getWin, getRepos, basePath) {
   }
 }
 
-export function startIssuesSync(getWin, getRepos, basePath) {
+export function startIssuesSync(getWin, getRepos, getKeep, basePath) {
   stopIssuesSync();
   timer = setTimeout(() => {
-    tick(getWin, getRepos, basePath);
-    timer = setInterval(() => tick(getWin, getRepos, basePath), TICK_MS);
+    tick(getWin, getRepos, getKeep, basePath);
+    timer = setInterval(() => tick(getWin, getRepos, getKeep, basePath), TICK_MS);
   }, FIRST_TICK_MS);
 }
 

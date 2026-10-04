@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildEntries } from './timeline-model.js';
+import { buildEntries, localDate } from './timeline-model.js';
 import {
-  dayBuckets, countByProject, prWeeks, issueFlow, repoHealth, activitySummary, SUMMARY_KINDS,
+  dayBuckets, countByProject, prWeeks, issueFlow, repoHealth, activitySummary, SUMMARY_KINDS, pipelineFlow, FLOW_STAGES,
 } from './summary-model.js';
 
 const now = new Date('2026-09-04T18:00:00').getTime(); // Friday, local time
@@ -97,4 +97,101 @@ test('activitySummary separates today from the trailing week and counts pr opene
 
 test('SUMMARY_KINDS', () => {
   assert.deepEqual(SUMMARY_KINDS, ['commit', 'session', 'pr', 'idea']);
+});
+
+// ---- pipelineFlow ----
+const HR = 3600000;
+const at = (msAgo) => new Date(now - msAgo).toISOString();
+const h = (stage, msAgo, from = null) => ({ at: at(msAgo), from, to: stage });
+const idea = (over) => ({ id: 'i', stage: 'inbox', createdAt: at(DAY(1)), history: [], ...over });
+const dwellOf = (flow, stage) => flow.dwell.find((d) => d.stage === stage);
+
+test('pipelineFlow buckets created, shipped and killed by week and zero-fills', () => {
+  const ideas = [
+    idea({ id: 'a', createdAt: at(DAY(1)), stage: 'shipped', history: [h('shipped', DAY(1))] }),
+    idea({ id: 'b', createdAt: at(DAY(8)), stage: 'killed', history: [h('killed', DAY(8))] }),
+    idea({ id: 'old', createdAt: at(DAY(30)), stage: 'shipped', history: [h('shipped', DAY(20))] }),
+  ];
+  const f = pipelineFlow(ideas, 14, now);
+  assert.deepEqual(f.weeks.map((w) => w.weekStart), ['2026-08-17', '2026-08-24', '2026-08-31']);
+  assert.deepEqual(f.weeks.map((w) => [w.created, w.shipped, w.killed]), [[0, 0, 0], [1, 0, 1], [1, 1, 0]]);
+  assert.deepEqual(f.totals, { created: 2, shipped: 1, killed: 1 });
+});
+
+test('pipelineFlow counts every kill of a reopened idea', () => {
+  const f = pipelineFlow([idea({ stage: 'killed', history: [h('killed', DAY(5)), h('inbox', DAY(4), 'killed'), h('killed', DAY(2), 'inbox')] })], 14, now);
+  assert.equal(f.totals.killed, 2);
+});
+
+test('pipelineFlow dwell counts closed visits ending in range with full duration', () => {
+  const ideas = [idea({ stage: 'shaped', history: [h('inbox', DAY(20)), h('shaped', DAY(3), 'inbox')] })];
+  const f = pipelineFlow(ideas, 14, now);
+  assert.equal(dwellOf(f, 'inbox').n, 1);
+  assert.equal(dwellOf(f, 'inbox').median, DAY(17));
+});
+
+test('pipelineFlow ignores a visit that ended before the cutoff', () => {
+  const ideas = [idea({ stage: 'shaped', history: [h('inbox', DAY(30)), h('shaped', DAY(20), 'inbox')] })];
+  const f = pipelineFlow(ideas, 14, now);
+  assert.equal(dwellOf(f, 'inbox').n, 0);
+});
+
+test('pipelineFlow open visit runs to now and counts in n and open', () => {
+  const f = pipelineFlow([idea({ stage: 'queued', history: [h('queued', 5 * HR)] })], 14, now);
+  const d = dwellOf(f, 'queued');
+  assert.deepEqual([d.n, d.open, d.median, d.p90], [1, 1, 5 * HR, 5 * HR]);
+});
+
+test('pipelineFlow last entry is not open when the idea moved on without history', () => {
+  const f = pipelineFlow([idea({ stage: 'built', history: [h('queued', 5 * HR)] })], 14, now);
+  assert.equal(dwellOf(f, 'queued').n, 0);
+});
+
+test('pipelineFlow reset loop yields two visits per stage', () => {
+  const ideas = [idea({ stage: 'building', history: [h('queued', 10 * HR), h('building', 8 * HR), h('queued', 6 * HR), h('building', 4 * HR)] })];
+  const f = pipelineFlow(ideas, 14, now);
+  assert.equal(dwellOf(f, 'queued').n, 2);
+  assert.equal(dwellOf(f, 'building').n, 2);
+  assert.equal(dwellOf(f, 'building').open, 1);
+});
+
+test('pipelineFlow dwell always lists the seven stages and never terminals', () => {
+  const f = pipelineFlow([idea({ stage: 'shipped', history: [h('built', 3 * HR), h('shipped', HR)] })], 14, now);
+  assert.deepEqual(f.dwell.map((d) => d.stage), FLOW_STAGES);
+  assert.equal(pipelineFlow([], 14, now).dwell.length, 7);
+});
+
+test('pipelineFlow uses nearest rank for median and p90', () => {
+  const ideas = [];
+  for (let n = 1; n <= 10; n += 1) {
+    ideas.push(idea({ id: `i${n}`, stage: 'shaped', history: [h('inbox', n * HR + HR), h('shaped', HR, 'inbox')] }));
+  }
+  const d = dwellOf(pipelineFlow(ideas, 14, now), 'inbox');
+  assert.equal(d.n, 10);
+  assert.equal(d.median, 5 * HR);
+  assert.equal(d.p90, 9 * HR);
+});
+
+test('pipelineFlow empty stage has null statistics', () => {
+  const d = dwellOf(pipelineFlow([], 14, now), 'planned');
+  assert.deepEqual(d, { stage: 'planned', n: 0, open: 0, median: null, p90: null });
+});
+
+test('pipelineFlow bulkDays marks ten closes on one local day, not nine, not pre-cutoff', () => {
+  const ten = Array.from({ length: 10 }, (_, i) => idea({ id: `t${i}`, stage: 'killed', history: [h('killed', DAY(2) + i * 1000)] }));
+  const nine = Array.from({ length: 9 }, (_, i) => idea({ id: `n${i}`, stage: 'shipped', history: [h('shipped', DAY(5) + i * 1000)] }));
+  const old = Array.from({ length: 12 }, (_, i) => idea({ id: `o${i}`, stage: 'shipped', history: [h('shipped', DAY(40) + i * 1000)] }));
+  const f = pipelineFlow([...ten, ...nine, ...old], 14, now);
+  assert.deepEqual(f.bulkDays, [{ date: localDate(new Date(now - DAY(2))), count: 10 }]);
+});
+
+test('pipelineFlow skips unparseable history stamps and handles empty input', () => {
+  const f = pipelineFlow([idea({ stage: 'shaped', history: [h('inbox', DAY(3)), { at: 'garbage', from: 'inbox', to: 'planned' }, h('shaped', DAY(1), 'inbox')] })], 14, now);
+  assert.equal(dwellOf(f, 'inbox').median, DAY(2));
+  assert.equal(dwellOf(f, 'planned').n, 0);
+  const e = pipelineFlow(undefined, 14, now);
+  assert.deepEqual(e.totals, { created: 0, shipped: 0, killed: 0 });
+  assert.equal(e.weeks.length, 3);
+  assert.deepEqual(e.bulkDays, []);
+  assert.ok(e.dwell.every((d) => d.median === null));
 });

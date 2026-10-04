@@ -105,7 +105,12 @@ whole system, not AI throughput. Do not suggest raising the cap to get past it.
 
    The verdict is a short summary for the user: which reviewers ran, how many
    findings, how many confirmed, which ones changed the plan, and anything you
-   dropped and why.
+   dropped and why. Separate the folds by kind. A mechanical fold had one
+   clearly right fix and gets a count with one line each. A taste fold had more
+   than one viable fix, or the reviewers disagreed, and you picked; list each
+   with the option you rejected, first in the verdict, so the user can overrule
+   it before queueing. When the reviewers agree the plan's direction should
+   change, that is the stop-and-ask in step 4, never a fold.
 
 8. **Report** with the count and:
 

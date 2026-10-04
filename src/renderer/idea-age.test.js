@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildingSince, buildingAge, formatAge, buildingStale,
-  enteredStageAt, launchActive, launchAge, launchStale,
+  enteredStageAt, launchActive, launchAge, launchStale, builtStamp, builtAge, orderDone,
 } from './idea-age.js';
 
 const NOW = Date.parse('2026-09-03T12:00:00Z');
@@ -126,4 +126,46 @@ test('the launch rail goes stale at twenty minutes, and an unknown age never doe
   assert.equal(launchStale({ at: 'nope' }, NOW), false);
   assert.equal(launchAge({ at: NOW - 3 * MIN }, NOW), 3 * MIN);
   assert.equal(launchAge({}, NOW), null);
+});
+
+const DAY = 24 * HOUR;
+const builtCard = (id, days, extra = {}) => ({
+  id, stage: 'built', impact: 1, createdAt: '2026-08-01T00:00:00Z', updatedAt: ago(0),
+  history: [{ at: ago(days * DAY + HOUR), to: 'building' }, { at: ago(days * DAY), to: 'built' }], ...extra,
+});
+const shippedCard = (id, impact, createdAt = '2026-08-01T00:00:00Z') => ({ id, stage: 'shipped', impact, createdAt, history: [] });
+const byImpact = (a, b) => (b.impact - a.impact) || a.createdAt.localeCompare(b.createdAt);
+
+test('builtStamp is the last entry into built, as an ISO string', () => {
+  const i = builtCard('a', 4);
+  i.history.push({ at: ago(DAY), to: 'killed' }, { at: ago(2 * DAY), to: 'built' });
+  assert.equal(builtStamp(i), ago(2 * DAY));
+});
+
+test('builtStamp falls back to updatedAt, then to empty', () => {
+  assert.equal(builtStamp({ stage: 'built', history: [], updatedAt: ago(HOUR) }), ago(HOUR));
+  assert.equal(builtStamp({ stage: 'built' }), '');
+});
+
+test('builtAge reads the same stamp, clamps a future one to zero, and is null without one', () => {
+  assert.equal(builtAge(builtCard('a', 2), NOW), 2 * DAY);
+  assert.equal(builtAge({ stage: 'built', updatedAt: new Date(NOW + HOUR).toISOString() }, NOW), 0);
+  assert.equal(builtAge({ stage: 'built' }, NOW), null);
+});
+
+test('Done puts built cards first, longest waiting first, above higher-impact shipped cards', () => {
+  const rows = [shippedCard('s5', 5), builtCard('b1', 1), shippedCard('s2', 2), builtCard('b8', 8), builtCard('b3', 3)];
+  assert.deepEqual(orderDone(rows, byImpact).map((i) => i.id), ['b8', 'b3', 'b1', 's5', 's2']);
+});
+
+test('Done breaks a built tie on createdAt and puts an undatable built card last among built', () => {
+  const twin = (id, createdAt) => ({ ...builtCard(id, 2), createdAt });
+  const rows = [twin('later', '2026-08-02T00:00:00Z'), { id: 'nodate', stage: 'built', createdAt: '2026-07-01T00:00:00Z' }, twin('earlier', '2026-08-01T00:00:00Z')];
+  assert.deepEqual(orderDone(rows, byImpact).map((i) => i.id), ['earlier', 'later', 'nodate']);
+});
+
+test('orderDone does not reorder the input array', () => {
+  const rows = [shippedCard('s', 1), builtCard('b', 1)];
+  orderDone(rows, byImpact);
+  assert.deepEqual(rows.map((i) => i.id), ['s', 'b']);
 });

@@ -84,10 +84,16 @@ const cap = Array.from({ length: 10 }, (_, n) => idea({
   projectId: ['dashboard', 'mobile', 'api'][n % 3],
 }));
 
+const daysAgo = (d) => hoursAgo(d * 24);
+const builtAt = (d) => ({
+  history: [{ at: daysAgo(d + 0.1), from: 'queued', to: 'building' }, { at: daysAgo(d), from: 'building', to: 'built' }],
+  updatedAt: daysAgo(d),
+});
 const built = [
-  idea({ id: 'd1', title: 'Show last commit on repo rows', stage: 'built', impact: 3, planEffort: 'low', projectId: 'dashboard', github: { number: 42, url: 'https://example.com/42' } }),
-  idea({ id: 'd2', title: 'Sync indicator on the header', stage: 'built', impact: 4, planEffort: 'medium', projectId: 'dashboard', github: { number: 39, url: 'https://example.com/39' } }),
-  idea({ id: 'd3', title: 'Drag to reorder cards', stage: 'shipped', impact: 3, projectId: 'dashboard' }),
+  idea({ id: 'd1', title: 'Show last commit on repo rows', stage: 'built', impact: 3, planEffort: 'low', projectId: 'dashboard', github: { number: 42, url: 'https://example.com/42' }, ...builtAt(0.3) }),
+  idea({ id: 'd2', title: 'Sync indicator on the header', stage: 'built', impact: 4, planEffort: 'medium', projectId: 'dashboard', github: { number: 39, url: 'https://example.com/39' }, ...builtAt(4) }),
+  idea({ id: 'd4', title: 'Tray badge for stale repos', stage: 'built', impact: 2, planEffort: 'low', projectId: 'dashboard', github: { number: 37, url: 'https://example.com/37' }, ...builtAt(8) }),
+  idea({ id: 'd3', title: 'Drag to reorder cards', stage: 'shipped', impact: 5, projectId: 'dashboard' }),
 ];
 
 const killed = [

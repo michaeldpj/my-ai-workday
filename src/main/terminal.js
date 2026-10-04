@@ -14,7 +14,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { safeRepoName } from './git.js';
+import { safeRepoName, listWorktrees, lockPid } from './git.js';
 import { safeDirPath } from '../renderer/workspace-model.js';
 import { MODELS } from '../../scripts/idea-fields.mjs';
 
@@ -136,6 +136,42 @@ export function launchableActions(configDir) {
 /** What `claude --effort` accepts. The UI calls this reasoning, to keep it apart from an idea's effort. */
 export const EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh', 'max']);
 
+/**
+ * The bar's model choice that defers to the cost policy. It never reaches
+ * buildCommand: resolveModel turns it into a pinned id first.
+ */
+export const POLICY = 'policy';
+
+const OPUS = 'claude-opus-5-5';
+const FABLE = 'claude-fable-5-1';
+
+/**
+ * Full ids the policy resolves to. Pinned rather than aliases, because the
+ * cost policy forbids reaching Opus 5.0 through an unpinned alias. Kept apart
+ * from MODELS, which also validates the per-idea `model` field and is copied
+ * into plugin/lib, so neither of those widens.
+ */
+export const PINNED_MODELS = Object.freeze([OPUS, FABLE]);
+
+/** Every value the bar's model select may store. */
+export const LAUNCH_MODELS = Object.freeze([POLICY, ...MODELS]);
+
+/**
+ * The model and reasoning level a launch uses. With an alias on the bar, the
+ * idea's own model wins and the bar's reasoning applies, as before. With the
+ * bar on policy, a plan for a high idea runs Fable 5.1 at medium, any other
+ * plan runs Opus 5.5 at high, and every other stage runs Opus 5.5 at medium.
+ * An idea's own model still replaces the model under policy, and the stage's
+ * reasoning stays, because the bar's reasoning select is disabled then.
+ */
+export function resolveModel({ action, planEffort, ideaModel, prefs }) {
+  if (prefs?.model !== POLICY) return { model: ideaModel || prefs?.model, effort: prefs?.effort };
+  const stage = action !== 'plan' ? { model: OPUS, effort: 'medium' }
+    : planEffort === 'high' ? { model: FABLE, effort: 'medium' }
+    : { model: OPUS, effort: 'high' };
+  return ideaModel ? { ...stage, model: ideaModel } : stage;
+}
+
 const WORKTREE_RE = /^[a-z0-9-]{1,64}$/;
 
 /**
@@ -183,7 +219,7 @@ export function buildCommand({ cwd, cli, personalDir, model, effort, worktree, n
   if (!CLI_KEYS.includes(cli)) return { ok: false, error: `unknown cli "${cli}"` };
   if (cli === 'personal' && !personalDir) return { ok: false, error: 'no personal Claude folder is set in Settings' };
   if (cli === 'personal' && !safeDirPath(personalDir)) return { ok: false, error: 'the personal Claude folder is not a safe path' };
-  if (!MODELS.includes(model)) return { ok: false, error: `unknown model "${model}"` };
+  if (!MODELS.includes(model) && !PINNED_MODELS.includes(model)) return { ok: false, error: `unknown model "${model}"` };
   if (!EFFORTS.includes(effort)) return { ok: false, error: `unknown effort "${effort}"` };
   if (!WORKTREE_RE.test(worktree || '')) return { ok: false, error: 'malformed worktree name' };
   if (!ID_RE.test(ideaId)) return { ok: false, error: 'malformed idea id' };
@@ -250,13 +286,23 @@ export function resolveLaunchRepo(idea, ws) {
 }
 
 /**
+ * The live session holding an idea's worktree, or null. Matched on the
+ * directory name: `git worktree list` run in the repo lists only that repo's
+ * worktrees, and the name carries the idea's id tail.
+ */
+export function liveWorktree(list, name) {
+  const wt = (list || []).find((w) => w.inUse && path.basename(w.path || '') === name);
+  return wt ? { worktree: name, branch: wt.branch, pid: lockPid(wt.locked) } : null;
+}
+
+/**
  * @param {string} action  key of ACTIONS
  * @param {string} ideaId  full idea id
  * @param {string} repo    repo directory name, validated
  * @param {string} basePath  configured repo root
- * @param {{cli: string, personalDir: string, model: string, effort: string, worktree: string, name: string}} opts  enumerated launch settings, the expanded personal Claude folder ('' when unset), and the session name
+ * @param {{cli: string, personalDir: string, model: string, effort: string, worktree: string, name: string, force: boolean}} opts  enumerated launch settings, the expanded personal Claude folder ('' when unset), and the session name
  */
-export function launchSession(action, ideaId, repo, basePath, opts = {}) {
+export async function launchSession(action, ideaId, repo, basePath, opts = {}) {
   if (!Object.hasOwn(ACTIONS, action)) return { ok: false, error: `unknown action "${action}"` };
   if (!ID_RE.test(ideaId)) return { ok: false, error: 'malformed idea id' };
   // Shared with the git scanner rather than re-derived: several real checkouts
@@ -287,6 +333,12 @@ export function launchSession(action, ideaId, repo, basePath, opts = {}) {
 
   const built = buildCommand({ cwd, slash, ideaId, ...opts });
   if (!built.ok) return built;
+  // Read at click time from the same realpath'd checkout the command will cd
+  // into. A git failure lists nothing and the launch goes ahead, as before.
+  if (!opts.force) {
+    const live = liveWorktree(await listWorktrees(cwd), opts.worktree);
+    if (live) return { ok: false, live, error: `a session (pid ${live.pid}) is still running in ${live.worktree}` };
+  }
   const command = built.command;
 
   const script = haveITerm()

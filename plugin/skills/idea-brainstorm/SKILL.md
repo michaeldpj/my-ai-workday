@@ -49,9 +49,10 @@ Read first:
    justify. Rounding up on effort is about scrutiny, never about whether the
    thing is worth doing.
 
-3. **Write the brief** to a temp file, following the template exactly. The
-   blast radius section must reflect what you actually read, not what you
-   assume.
+3. **Write the brief** to a temp file, following the template exactly,
+   including the Minimal/Full/Pick close of the Sketch for a "Recommend: build"
+   brief. The blast radius section must reflect what you actually read, not
+   what you assume.
 
 4. **Rate the effort** against the rubric, only for a "Recommend: build"
    brief. Round up when between two. Remember this is a proposal about how much

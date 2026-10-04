@@ -58,9 +58,14 @@ const REQUIRES_ARTIFACT = {
   built: { field: 'github', earns: 'an issue', via: '/idea-execute' },
 };
 
-/** Transitions that must carry a reason, because they undo or end work. */
+/**
+ * Transitions that must carry a reason, because they undo or end work. Every
+ * kill is here: a killed idea without a reason gets brainstormed again from
+ * scratch, and the board's kill dialog supplies one.
+ */
 const NOTE_REQUIRED = new Set([
   'planned>shaped', 'reviewed>shaped', 'building>queued', 'killed>inbox',
+  'inbox>killed', 'shaped>killed', 'planned>killed', 'reviewed>killed', 'queued>killed', 'built>killed',
 ]);
 
 // ---------------------------------------------------------------- utilities
@@ -307,7 +312,7 @@ export function applyTransition(doc, idea, to, { note = null, by = null } = {}) 
   }
 
   const key = `${from}>${to}`;
-  if (NOTE_REQUIRED.has(key) && !note) fail(`moving ${from} to ${to} requires a reason`);
+  if (NOTE_REQUIRED.has(key) && !String(note ?? '').trim()) fail(`moving ${from} to ${to} requires a reason`);
 
   // Earned stages: the artifact must already be on the idea.
   const need = REQUIRES_ARTIFACT[to];

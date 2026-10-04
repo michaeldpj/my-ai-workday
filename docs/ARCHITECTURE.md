@@ -145,14 +145,19 @@ GitHub appears in six places.
 1. The ideas store remote. If the user adds a private remote to the store
    folder, every stage transition is pushed to it best-effort.
 2. Sessions write constantly. `/idea-execute` opens the tracking issue,
-   appends its decision log, and pushes the branch. `/idea-ship` closes the
+   appends its decision log (each entry tagged mechanical or taste, so the
+   judgment calls can be read first), and pushes the branch. `/idea-ship` closes the
    issue. All of this happens inside Claude Code sessions, not in the app.
 3. The board links out. A `built` card links to its issue.
 4. The scanner reads PR state. During a scan the app runs `gh pr list`
    (read-only, local CLI) for repos that have unmerged branches, so a
    squash-merged branch is not reported as forgotten work.
 5. The Issues view reads issues and pull requests into a local store. A
-   background loop walks every repo every ten minutes. The first pull for a
+   background loop walks every repo every ten minutes, except repos marked
+   as upstream clones (someone else's project kept on a card), which also
+   stay out of the rollup counts, the Timeline, the Summary's activity
+   figures and the weekly digest, and whose files refresh only when their
+   card's Issues tab opens. Their status still shows everywhere. The first pull for a
    repo takes its full issue and PR history (read-only, local `gh` CLI,
    `gh issue list` and `gh pr list`), and every pull after asks only for rows
    updated since the last successful fetch, merging by number into one JSON
@@ -165,7 +170,7 @@ GitHub appears in six places.
    comment bodies through the same escape-first markdown module the briefing
    uses.
 6. The Timeline reads commit history. The Timeline tab (Cmd+5) runs `git log --all`
-   (read-only, local CLI) across every repo to place commits on a
+   (read-only, local CLI) across every repo but upstream clones to place commits on a
    week-by-week timeline alongside session-log issues and PR rows from the
    local issue store and idea stage transitions. This is local and read-only
    like the rest of this list, and not a GitHub call, but it is included here
@@ -180,7 +185,7 @@ The app copies shell commands to the clipboard and never writes to any repo.
 The one amendment is that the Ideas board may open a Terminal or iTerm window
 running an enumerated Claude Code slash command (`src/main/terminal.js`). The
 launcher accepts an action key from a frozen map plus a regex-validated idea
-id, never a command string, resolves the stage to one of two fixed forms (its bare name for a skill in the config folder's `skills/`, or `idea-pipeline:<name>` for one from a user-scope, enabled plugin install, reading the plugin records only to check that a skill file exists), applies shell quoting before AppleScript quoting,
+id, never a command string, takes its model from a fixed alias list or from a pinned-id list that a per-stage policy resolves to, resolves the stage to one of two fixed forms (its bare name for a skill in the config folder's `skills/`, or `idea-pipeline:<name>` for one from a user-scope, enabled plugin install, reading the plugin records only to check that a skill file exists), applies shell quoting before AppleScript quoting,
 and resolves the repo path with realpath strictly beneath the configured Repo
 Folder. Claude Code prompts before touching files, so the app starts sessions
 but authors nothing. Nothing in the system deploys, because `/idea-execute`

@@ -11,7 +11,8 @@
 import { captureRects, playFlip } from './flip.js';
 import { keyAction } from './idea-keys.js';
 import { ideaComparator, EFFORT_RANK, effortOf } from './idea-sort.js';
-import { buildingAge, formatAge, buildingStale, launchActive, launchAge, launchStale } from './idea-age.js';
+import { buildingAge, formatAge, buildingStale, launchActive, launchAge, launchStale, builtStamp, builtAge, orderDone } from './idea-age.js';
+import { ageTier } from './repo-age.js';
 import { esc } from './text.js';
 
 const COLUMNS = [
@@ -90,8 +91,10 @@ function adopt(snap) {
   ideas = snap.ideas || [];
   byIssueUrl = new Map(ideas.filter((i) => i.github?.url).map((i) => [i.github.url, i]));
   rev = snap.rev;
-  // The dashboard card counts ideas in flight, so a card moving anywhere repaints it.
+  // The dashboard card counts ideas in flight, and the Timeline and Summary
+  // read idea history, so a card moving anywhere repaints them.
   window.renderGrid?.();
+  window.renderDataView?.();
   return true;
 }
 
@@ -132,9 +135,13 @@ function columns() {
   return showKilled() ? [...COLUMNS, KILLED_COLUMN] : COLUMNS;
 }
 
-/** The select is the live value; an unknown one is the comparator's problem, and it has a default. */
-function sortRows(rows) {
-  return rows.slice().sort(ideaComparator(document.getElementById('board-sort')?.value));
+/**
+ * The select is the live value, and an unknown one is the comparator's
+ * problem, since it has a default. Done alone puts built cards on top.
+ */
+function sortRows(rows, colKey) {
+  const cmp = ideaComparator(document.getElementById('board-sort')?.value);
+  return colKey === 'done' ? orderDone(rows, cmp) : rows.slice().sort(cmp);
 }
 
 /** Shaping pips: brief, plan, review. An express-lane card shows one filled. */
@@ -178,7 +185,7 @@ const editBtn = () =>
 /**
  * Quiet kill for stages where dropping the idea is legal but not the decision
  * the card is asking for. Reviewed keeps the full red Kill, since there the
- * choice IS queue-or-kill. Same confirm whichever control you use.
+ * choice IS queue-or-kill. Same reason dialog whichever control you use.
  */
 const killBtn = () =>
   `<button class="icard-copy kill" data-act="kill" title="Kill this idea" aria-label="Kill this idea">✕</button>`;
@@ -270,12 +277,20 @@ function railFor(i) {
   return '';
 }
 
+/** How long a built card has waited for a deploy, in the repo rows' pill and tiers. */
+function builtPill(i) {
+  const age = builtAge(i);
+  if (age === null) return '';
+  const at = builtStamp(i);
+  return `<span class="age-pill ${ageTier(at)}" title="built since ${esc(at.slice(0, 10))}">${esc(formatAge(age))}</span>`;
+}
+
 function card(i) {
   const mine = i.waitingOn === 'you';
   const eff = effortOf(i);
   const drag = DRAGGABLE_FROM.has(i.stage);
   const shaping = i.stage === 'shaped' || i.stage === 'planned' || i.stage === 'reviewed';
-  const tag = i.stage === 'built' ? '<span class="icard-tag ready">ready</span>'
+  const tag = i.stage === 'built' ? `<span class="icard-tag ready">ready</span>${builtPill(i)}`
     : i.stage === 'killed' ? '<span class="icard-tag killed">killed</span>'
     : i.cameBack ? '<span class="icard-tag back">came back</span>' : '';
   return `<div class="icard${mine ? ' mine' : ''}" tabindex="0" role="button" aria-label="${esc(i.title)}"
@@ -386,7 +401,7 @@ export function renderIdeas() {
   board.classList.toggle('with-killed', cols.length > COLUMNS.length);
 
   board.innerHTML = cols.map((col) => {
-    const inCol = sortRows(rows.filter((i) => col.stages.includes(i.stage)));
+    const inCol = sortRows(rows.filter((i) => col.stages.includes(i.stage)), col.key);
     const total = all.filter((i) => col.stages.includes(i.stage)).length;
     const body = inCol.length
       ? inCol.map(card).join('')
@@ -491,7 +506,12 @@ function paintLaunchPrefs(p) {
   const model = document.getElementById('launch-model');
   const reasoning = document.getElementById('launch-reasoning');
   if (model) model.value = p.model;
-  if (reasoning) reasoning.value = p.effort;
+  if (reasoning) {
+    reasoning.value = p.effort;
+    // Policy sets reasoning per stage, so the bar's level is kept but not used.
+    reasoning.disabled = p.model === 'policy';
+    reasoning.title = reasoning.disabled ? 'Policy sets the reasoning level per stage' : 'Reasoning level (claude --effort)';
+  }
   launchable = new Set(p.launchable || []);
   const toggle = document.getElementById('launch-cli');
   if (toggle) toggle.hidden = !p.personal;
@@ -557,14 +577,47 @@ async function ideaMove(id, to, note) {
 }
 
 /**
- * confirm(), not prompt(): Electron's renderer refuses window.prompt and throws
- * from the click handler, so a prompt-gated action silently does nothing. The
- * kill confirms and records no reason; /idea-kill from the CLI still takes one.
+ * Every kill takes a reason, and the store refuses one without it. The reason
+ * is typed in the overlay rather than on the card, because renderIdeas
+ * rewrites the board on every watcher event and would wipe a half-typed
+ * input. A DOM input, not prompt(), which Electron's renderer refuses.
  */
-async function ideaKill(id) {
+function ideaKill(id) {
   const i = ideas.find((x) => x.id === id);
-  if (!i || !confirm(`Kill "${i.title}"?`)) return;
-  await ideaMove(id, 'killed');
+  if (!i) return;
+  document.getElementById('idea-title').textContent = 'Kill idea';
+  document.getElementById('idea-content').innerHTML = `
+    <form class="idea-form" id="kill-form">
+      <div class="meta-line">${esc(i.title)}</div>
+      <label>Reason<input name="reason" maxlength="500" required placeholder="Why this is not worth doing"></label>
+    </form>`;
+  const acts = document.getElementById('idea-actions');
+  acts.innerHTML = '<button class="btn" data-act="close">Cancel</button><button class="btn danger" data-act="kill-confirm" disabled>Kill</button>';
+  acts.dataset.id = i.id;
+  const input = document.querySelector('#kill-form [name="reason"]');
+  const go = acts.querySelector('[data-act="kill-confirm"]');
+  input.addEventListener('input', () => { go.disabled = !input.value.trim(); });
+  // Enter would otherwise submit the form natively and reload the renderer.
+  document.getElementById('kill-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    ideaKillConfirm(id);
+  });
+  document.getElementById('idea-overlay').classList.add('show');
+  input.focus();
+}
+
+async function ideaKillConfirm(id) {
+  const form = document.getElementById('kill-form');
+  const reason = form?.querySelector('[name="reason"]').value.trim();
+  if (!reason || form.dataset.pending) return;
+  // One move per dialog, and close only this dialog: the store's lock can
+  // outlast a Cancel, after which the overlay may hold another card.
+  form.dataset.pending = '1';
+  const ok = applyResult(await window.electronAPI.ideasMove({ id, to: 'killed', note: reason }));
+  delete form.dataset.pending;
+  if (!ok) return;
+  if (document.getElementById('kill-form') === form) ideaClose();
+  window.showToast('Killed');
 }
 
 async function ideaReset(id) {
@@ -587,8 +640,21 @@ async function ideaCopy(id, action) {
   }
 }
 
-async function ideaLaunch(id, action) {
-  const res = await window.electronAPI.ideasLaunch({ action, id });
+/**
+ * A launch onto an idea whose worktree a live session still holds comes back
+ * refused with who holds it. confirm(), not prompt(), which Electron refuses.
+ * Yes resends with force, which skips only that check in main.
+ */
+async function ideaLaunch(id, action, force = false) {
+  const res = await window.electronAPI.ideasLaunch({ action, id, force });
+  if (res?.live && !force) {
+    const { worktree, branch, pid } = res.live;
+    const where = branch ? `${worktree} on ${branch}` : worktree;
+    if (confirm(`A session (pid ${pid}) is still running in ${where}. Open a second session in the same worktree anyway?`)) {
+      return ideaLaunch(id, action, true);
+    }
+    return;
+  }
   if (res?.ok === false) return window.showToast(res.error, 6000);
   // The rail on this card is driven by the marker main just stamped and handed
   // back, so a session shows as running the moment its terminal opens.
@@ -723,6 +789,7 @@ async function dispatch(id, act) {
   if (act === 'close') return ideaClose();
   if (act === 'queue') return ideaMove(id, 'queued');
   if (act === 'kill') return ideaKill(id);
+  if (act === 'kill-confirm') return ideaKillConfirm(id);
   if (act === 'reset') return ideaReset(id);
   if (act === 'dismiss-live') return ideaDismissLive(id);
   if (act === 'edit') return ideaEdit(id);
@@ -868,8 +935,8 @@ export function initIdeaDrag() {
       window.showToast('That column is earned by a command, not by dragging. Use the card action.', 5000);
       return;
     }
-    // Same confirm as the button, whichever way you got here.
-    if (to === 'killed') { await ideaKill(id); return; }
+    // Same reason dialog as the button, whichever way you got here.
+    if (to === 'killed') return ideaKill(id);
     await ideaMove(id, to);
   });
 }
@@ -880,7 +947,7 @@ export function subscribeIdeas() {
   window.electronAPI.onIdeasChanged?.((snap) => {
     // A card moving on its own when a session finishes elsewhere is the whole
     // point of the watcher.
-    if (adopt(snap)) { renderIdeas(); if (document.body.dataset.view === 'timeline') window.renderTimeline?.(); }
+    if (adopt(snap)) renderIdeas();
   });
   window.electronAPI.onIdeasSync?.(renderSyncStatus);
   // Ask once at startup: the first tick may already have run and pushed its

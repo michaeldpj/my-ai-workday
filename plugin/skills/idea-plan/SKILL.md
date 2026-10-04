@@ -37,6 +37,14 @@ rather than switching silently, and say which model wrote it.
    reading the code is worse than waiting. Grep before you write. A plan lists all call
    sites before it proposes a mutation.
 
+   Check the history of the touched area too. Run
+   `git log --oneline -20 -- <files the plan changes>` and search the repo's
+   CHANGELOG or status log for the topic, looking for reverts, rollbacks and
+   repeated fixes there. When the area has been reverted or fixed more than
+   once, name it in the plan as a prior problem area, say what went wrong
+   before, and state how this plan avoids it. A plan that repeats a reverted
+   approach without saying why it differs now is a finding for review.
+
 3. **Write the plan** to the first repo in `repos`:
 
    ```

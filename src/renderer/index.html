@@ -93,7 +93,8 @@
         <button type="button" data-cli="work" class="on">claude</button>
         <button type="button" data-cli="personal">personal</button>
       </div>
-      <select class="capture-sel launch-sel" id="launch-model" title="Default model">
+      <select class="capture-sel launch-sel" id="launch-model" title="Default model. policy picks per stage: Fable 5.1 medium for a high plan, Opus 5.5 high for other plans, Opus 5.5 medium for everything else">
+        <option value="policy">policy</option>
         <option value="fable">fable</option>
         <option value="opus">opus</option>
         <option value="sonnet">sonnet</option>

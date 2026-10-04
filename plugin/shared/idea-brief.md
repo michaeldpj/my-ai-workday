@@ -40,6 +40,19 @@ Two or three paragraphs on the approach. Enough that a plan could be written
 from it, not so much that the plan is already written. Name the mechanism, not
 the implementation.
 
+Close the section with two short options and a pick, so the smallest version
+is weighed against the obvious one rather than skipped:
+
+- **Minimal**: the fewest files and smallest diff that removes the harm, with
+  what it leaves undone.
+- **Full**: the approach the sketch describes, with what it costs beyond the
+  minimal one.
+- **Pick**: which one and why, in one line. Minimal wins when it removes the
+  harm the Harm line names.
+
+When the sketch already is the minimal version and nothing larger is worth
+naming, say so in one line instead of inventing a second option.
+
 ## Blast radius
 
 - **Repos**: every repo that changes

@@ -51,17 +51,24 @@ export function countByProject(entries, kind) {
     .sort((a, b) => b.count - a.count || a.projectId.localeCompare(b.projectId));
 }
 
-/** Opened vs merged PR counts per week, oldest first, zero-filled across the range. */
-export function prWeeks(prs, days, now = Date.now()) {
+/** Zero-filled week list for a range, keyed by weekStart, Monday of the cutoff through the current week. */
+function rangeWeeks(days, now, blank) {
   const cutoff = now - days * DAY;
   const endWeek = weekStart(new Date(now).toISOString());
   const weeks = new Map();
-  let cursor = new Date(`${weekStart(new Date(cutoff).toISOString())}T00:00:00`);
+  const cursor = new Date(`${weekStart(new Date(cutoff).toISOString())}T00:00:00`);
   while (localDate(cursor) <= endWeek) {
     const w = localDate(cursor);
-    weeks.set(w, { weekStart: w, opened: 0, merged: 0 });
+    weeks.set(w, { weekStart: w, ...blank });
     cursor.setDate(cursor.getDate() + 7);
   }
+  return weeks;
+}
+
+/** Opened vs merged PR counts per week, oldest first, zero-filled across the range. */
+export function prWeeks(prs, days, now = Date.now()) {
+  const cutoff = now - days * DAY;
+  const weeks = rangeWeeks(days, now, { opened: 0, merged: 0 });
   for (const p of prs || []) {
     if (p.openedAt && Date.parse(p.openedAt) >= cutoff) {
       const w = weekStart(p.openedAt);
@@ -73,6 +80,67 @@ export function prWeeks(prs, days, now = Date.now()) {
     }
   }
   return [...weeks.values()];
+}
+
+export const FLOW_STAGES = ['inbox', 'shaped', 'planned', 'reviewed', 'queued', 'building', 'built'];
+export const BULK_CLOSE_DAY = 10;
+
+const NO_FLOW = Object.freeze({ created: 0, shipped: 0, killed: 0 });
+const nearestRank = (sorted, q) => (sorted.length ? sorted[Math.ceil(q * sorted.length) - 1] : null);
+
+/**
+ * Idea pipeline flow over the range: created, shipped and killed per week,
+ * time spent in each non-terminal stage (one visit per history entry, counted
+ * when it ended in range or is still open, full unclipped duration), and local
+ * days with BULK_CLOSE_DAY or more closes. History entries with an unparseable
+ * `at` are dropped before visits are built.
+ */
+export function pipelineFlow(ideas, days, now = Date.now()) {
+  const cutoff = now - days * DAY;
+  const weeks = rangeWeeks(days, now, NO_FLOW);
+  const totals = { ...NO_FLOW };
+  const visits = new Map(FLOW_STAGES.map((s) => [s, { ms: [], open: 0 }]));
+  const closesByDay = new Map();
+  const count = (kind, iso) => {
+    totals[kind] += 1;
+    const w = weeks.get(weekStart(iso));
+    if (w) w[kind] += 1;
+  };
+
+  for (const idea of ideas || []) {
+    if (idea.createdAt && Date.parse(idea.createdAt) >= cutoff) count('created', idea.createdAt);
+    const history = (idea.history || []).filter((e) => Number.isFinite(Date.parse(e.at)));
+    history.forEach((e, i) => {
+      const start = Date.parse(e.at);
+      if (e.to === 'shipped' || e.to === 'killed') {
+        if (start < cutoff) return;
+        count(e.to, e.at);
+        const day = dayKey(e.at);
+        closesByDay.set(day, (closesByDay.get(day) || 0) + 1);
+        return;
+      }
+      const v = visits.get(e.to);
+      if (!v) return;
+      const next = history[i + 1];
+      const isOpen = !next && idea.stage === e.to;
+      if (!next && !isOpen) return;
+      const end = next ? Date.parse(next.at) : now;
+      if (!isOpen && end < cutoff) return;
+      v.ms.push(Math.max(0, end - start));
+      if (isOpen) v.open += 1;
+    });
+  }
+
+  const dwell = FLOW_STAGES.map((stage) => {
+    const { ms, open } = visits.get(stage);
+    const sorted = ms.sort((a, b) => a - b);
+    return { stage, n: sorted.length, open, median: nearestRank(sorted, 0.5), p90: nearestRank(sorted, 0.9) };
+  });
+  const bulkDays = [...closesByDay.entries()]
+    .filter(([, c]) => c >= BULK_CLOSE_DAY)
+    .map(([date, c]) => ({ date, count: c }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  return { weeks: [...weeks.values()], totals, dwell, bulkDays };
 }
 
 /**

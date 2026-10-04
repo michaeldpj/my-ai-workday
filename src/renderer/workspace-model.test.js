@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { validateWorkspace, shellRepoPath, safeDirPath, gitPushArgs, WORKSPACE_ID, ALL_STATUSES, filterStatusSuggestions } from './workspace-model.js';
+import { validateWorkspace, shellRepoPath, safeDirPath, gitPushArgs, WORKSPACE_ID, ALL_STATUSES, filterStatusSuggestions, ownProjects, repoNames } from './workspace-model.js';
 
 // Invented records shaped like the live workspace. Never paste live data here.
 const repo = (over = {}) => ({
@@ -68,6 +68,7 @@ const REFUSALS = [
   ['a repo name with a quote', withRepo({ name: "a'b" }), /^ws\[0\]\.repos\[0\]\.name /],
   ['a platform carrying markup', withRepo({ platform: '<img src=x onerror=alert(1)>' }), /\.repos\[0\]\.platform must be one of/],
   ['an unknown repo status', withRepo({ status: 'needs-<b>' }), /\.repos\[0\]\.status /],
+  ['an upstream flag that is not a boolean', withRepo({ upstream: 'yes' }), /\.repos\[0\]\.upstream /],
   ['an unknown project status', withProject({ status: 'shipped' }), /^ws\[0\]\.status /],
   ['an unknown priority', withProject({ priority: 'urgent' }), /^ws\[0\]\.priority /],
   ['a focus tone that breaks a class attribute', withProject({ focusTone: 'err" onclick="x' }), /^ws\[0\]\.focusTone /],
@@ -177,4 +178,35 @@ test('gitPushArgs pushes named branches and refuses unsafe names', () => {
   assert.equal(gitPushArgs(['a;rm']), null);
   assert.equal(gitPushArgs(['-f']), null);
   assert.equal(gitPushArgs(['$(x)']), null);
+});
+
+test('the upstream flag passes as true, false or absent', () => {
+  for (const upstream of [true, false, undefined]) {
+    assert.deepEqual(validateWorkspace(workspace({ ws: [project({ repos: [repo({ upstream })] })] })), { ok: true });
+  }
+});
+
+const mixed = () => [
+  project({ id: 'hollow', repos: [repo({ name: 'hollow-app' }), repo({ name: 'fork-of-x', upstream: true })] }),
+  project({ id: 'clones', repos: [repo({ name: 'their-game', upstream: true })] }),
+  project({ id: 'tools', repos: [repo({ name: 'tool-a', upstream: false }), repo({ name: 'a;bad' })] }),
+];
+
+test('repoNames lists every safe repo name in card order, upstream included', () => {
+  assert.deepEqual(repoNames(mixed()), ['hollow-app', 'fork-of-x', 'their-game', 'tool-a']);
+  assert.deepEqual(repoNames(undefined), []);
+  assert.deepEqual(repoNames([{ id: 'bare' }]), []);
+});
+
+test('ownProjects drops upstream repos, keeps every project, and leaves its input alone', () => {
+  const ws = mixed();
+  const before = JSON.stringify(ws);
+  const own = ownProjects(ws);
+  assert.deepEqual(own.map((p) => [p.id, p.repos.map((r) => r.name)]), [
+    ['hollow', ['hollow-app']], ['clones', []], ['tools', ['tool-a', 'a;bad']],
+  ]);
+  assert.equal(JSON.stringify(ws), before);
+  assert.deepEqual(repoNames(ownProjects(ws)), ['hollow-app', 'tool-a']);
+  assert.deepEqual(ownProjects(undefined), []);
+  assert.deepEqual(ownProjects([{ id: 'bare' }]), [{ id: 'bare', repos: [] }]);
 });

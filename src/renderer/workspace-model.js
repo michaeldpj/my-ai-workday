@@ -118,7 +118,7 @@ function checkRepo(r, path) {
   repoName(r.name, `${path}.name`);
   optOneOf(r.status, STATUSES, `${path}.status`);
   optOneOf(r.platform, PLATFORMS, `${path}.platform`);
-  for (const key of ['ship', 'buildTracked', 'buildStale']) optBool(r[key], `${path}.${key}`);
+  for (const key of ['ship', 'buildTracked', 'buildStale', 'upstream']) optBool(r[key], `${path}.${key}`);
   optText(r.notes, `${path}.notes`);
   optList(r.buildDeps, `${path}.buildDeps`).forEach((n, i) => repoName(n, `${path}.buildDeps[${i}]`));
   optList(r.ignoreBranches, `${path}.ignoreBranches`).forEach((b, i) => text(b, `${path}.ignoreBranches[${i}]`));
@@ -188,6 +188,19 @@ export function validateWorkspace(w) {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+}
+
+/**
+ * The workspace without repos marked `upstream`: clones of someone else's
+ * project, whose commits and issues are not this workspace's work.
+ */
+export function ownProjects(ws) {
+  return (ws || []).map((p) => ({ ...p, repos: (p.repos || []).filter((r) => r.upstream !== true) }));
+}
+
+/** Repo names on the workspace that pass safeRepoName, in card order. */
+export function repoNames(ws) {
+  return (ws || []).flatMap((p) => (p.repos || []).map((r) => r.name)).filter(safeRepoName);
 }
 
 /**

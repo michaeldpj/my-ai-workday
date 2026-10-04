@@ -142,10 +142,22 @@ Append to the issue's `## Decisions` section **as you go**, not at the end. One
 entry per decision you made on the user's behalf:
 
 ```markdown
-- **Reused the existing status choice column rather than adding a new one.**
+- **[taste] Reused the existing status choice column rather than adding a new one.**
   Rejected: a new column, which would have needed a solution change and made a
   second place the status lives.
 ```
+
+Tag every entry with one of two kinds, so the user can read the ones that need
+judgment and skim the rest:
+
+- **[mechanical]**: the plan, the repo's CLAUDE.md or an existing convention
+  settled it, and any careful implementer would have chosen the same.
+- **[taste]**: two or more options were viable with different tradeoffs and
+  you picked one. Name the rejected option every time.
+
+When the step 8 issue update summarizes the log, list the taste entries first
+with their count. A decision that would change the plan's stated direction is
+neither kind; it is a stop under the four stops, not a log entry.
 
 This log is the only thing that makes unattended execution reviewable instead
 of mysterious. The user accepted the largest authority transfer in this system

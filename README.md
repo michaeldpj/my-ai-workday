@@ -31,6 +31,12 @@ Cmd+N opens quick capture, Cmd+I adds an idea, Cmd+R rescans the repositories an
 
 The app never writes to your repositories. Push, Commit and the ship action copy a shell command to the clipboard for you to run, and nothing in the app deploys anything. The one thing it starts is a Terminal or iTerm window running a Claude Code slash command from a fixed list (`ACTIONS` in `src/main/terminal.js`), opened in a worktree named for the idea after the idea id has been validated, and Claude Code still asks before it touches a file.
 
+## Architecture
+
+The Electron main process sits at the center, taking IPC calls from the renderer, reading your checkouts and GitHub through read-only `git` and `gh`, keeping secrets in the Keychain, and writing its own state to the store folder, which the Claude Code plugin also writes through the `ideas` CLI. `docs/ARCHITECTURE.md` covers the stores, the sync protocol and the write boundary in detail.
+
+![Architecture diagram: renderer, main process, store folder, Keychain, Git scanner, Issues sync, Claude Code, GitHub, sync server and Anthropic API](docs/images/architecture.png)
+
 ## Requirements
 
 - An Apple silicon Mac on macOS 13 or later. The build targets arm64 only.
